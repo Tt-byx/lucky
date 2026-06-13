@@ -1,5 +1,6 @@
 package com.lucky.controller;
 
+import com.lucky.annotation.Idempotent;
 import com.lucky.dto.ParticipantDTO;
 import com.lucky.dto.Result;
 import com.lucky.entity.Participant;
@@ -10,6 +11,9 @@ import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
 
+/**
+ * 参与者Controller
+ */
 @RestController
 @RequestMapping("/api/participant")
 @RequiredArgsConstructor
@@ -17,6 +21,10 @@ public class ParticipantController {
 
     private final ParticipantService participantService;
 
+    /**
+     * 注册参与者（接口幂等）
+     */
+    @Idempotent(prefix = "register", expireSeconds = 5, message = "请勿重复提交注册请求")
     @PostMapping("/register")
     public Result<Participant> register(@Valid @RequestBody ParticipantDTO dto) {
         return Result.ok(participantService.register(dto));

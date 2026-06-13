@@ -1,11 +1,13 @@
 package com.lucky.controller;
 
+import com.lucky.dto.CreateActivityDTO;
 import com.lucky.dto.Result;
 import com.lucky.entity.Activity;
 import com.lucky.service.ActivityService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
 
@@ -21,10 +23,8 @@ public class ActivityController {
 
     @Operation(summary = "创建活动", description = "创建一个新的抽奖活动")
     @PostMapping
-    public Result<Activity> create(
-            @Parameter(description = "活动名称", required = true)
-            @RequestParam String name) {
-        return Result.ok(activityService.createActivity(name));
+    public Result<Activity> create(@Valid @RequestBody CreateActivityDTO dto) {
+        return Result.ok(activityService.createActivity(dto));
     }
 
     @Operation(summary = "获取当前活动", description = "获取当前进行中的活动")

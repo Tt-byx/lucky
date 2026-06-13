@@ -1,6 +1,5 @@
 package com.lucky.service.impl;
 
-import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.lucky.entity.SensitiveWord;
 import com.lucky.mapper.SensitiveWordMapper;
@@ -8,14 +7,18 @@ import com.lucky.service.SensitiveWordService;
 import com.lucky.util.RedisUtil;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.redisson.api.RLock;
+import org.redisson.api.RedissonClient;
 import org.springframework.stereotype.Service;
 
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
+/**
+ * 敏感词服务实现（使用 Redisson 分布式锁）
+ */
 @Slf4j
 @Service
 @RequiredArgsConstructor
@@ -23,14 +26,16 @@ public class SensitiveWordServiceImpl extends ServiceImpl<SensitiveWordMapper, S
         implements SensitiveWordService {
 
     private final RedisUtil redisUtil;
+    private final RedissonClient redissonClient;
 
     /**
      * Redis key前缀
      */
     private static final String SENSITIVE_WORDS_KEY = "lucky:sensitive:words";
+    private static final String SENSITIVE_WORDS_LOCK_KEY = "lucky:sensitive:lock";
 
     /**
-     * 获取敏感词列表（带Redis缓存）
+     * 获取敏感词列表（带Redis缓存 + 分布式锁）
      */
     @Override
     public List<String> getAllWords() {
@@ -43,33 +48,58 @@ public class SensitiveWordServiceImpl extends ServiceImpl<SensitiveWordMapper, S
                     .collect(Collectors.toList());
         }
 
-        // Redis中没有，从数据库加载
-        synchronized (this) {
-            // 双重检查
-            cachedWords = redisUtil.setMembers(SENSITIVE_WORDS_KEY);
-            if (cachedWords != null && !cachedWords.isEmpty()) {
-                return cachedWords.stream()
-                        .map(Object::toString)
+        // Redis中没有，使用分布式锁加载
+        RLock lock = redissonClient.getLock(SENSITIVE_WORDS_LOCK_KEY);
+        try {
+            // 尝试获取锁，等待5秒，锁持有时间30秒
+            if (lock.tryLock(5, 30, TimeUnit.SECONDS)) {
+                try {
+                    // 双重检查
+                    cachedWords = redisUtil.setMembers(SENSITIVE_WORDS_KEY);
+                    if (cachedWords != null && !cachedWords.isEmpty()) {
+                        return cachedWords.stream()
+                                .map(Object::toString)
+                                .map(String::toLowerCase)
+                                .collect(Collectors.toList());
+                    }
+
+                    // 从数据库加载
+                    List<String> words = list().stream()
+                            .map(SensitiveWord::getWord)
+                            .map(String::toLowerCase)
+                            .collect(Collectors.toList());
+
+                    // 存入Redis，设置过期时间1小时
+                    if (!words.isEmpty()) {
+                        for (String word : words) {
+                            redisUtil.setAdd(SENSITIVE_WORDS_KEY, word);
+                        }
+                        redisUtil.expire(SENSITIVE_WORDS_KEY, 1, TimeUnit.HOURS);
+                    }
+
+                    log.info("敏感词缓存已加载到Redis，共 {} 个词", words.size());
+                    return words;
+                } finally {
+                    // 释放锁
+                    if (lock.isHeldByCurrentThread()) {
+                        lock.unlock();
+                    }
+                }
+            } else {
+                // 获取锁失败，直接从数据库查询
+                log.warn("获取敏感词锁失败，直接从数据库查询");
+                return list().stream()
+                        .map(SensitiveWord::getWord)
                         .map(String::toLowerCase)
                         .collect(Collectors.toList());
             }
-
-            // 从数据库加载
-            List<String> words = list().stream()
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            log.error("获取敏感词锁被中断");
+            return list().stream()
                     .map(SensitiveWord::getWord)
                     .map(String::toLowerCase)
                     .collect(Collectors.toList());
-
-            // 存入Redis，设置过期时间1小时
-            if (!words.isEmpty()) {
-                for (String word : words) {
-                    redisUtil.setAdd(SENSITIVE_WORDS_KEY, word);
-                }
-                redisUtil.expire(SENSITIVE_WORDS_KEY, 1, TimeUnit.HOURS);
-            }
-
-            log.info("敏感词缓存已加载到Redis，共 {} 个词", words.size());
-            return words;
         }
     }
 

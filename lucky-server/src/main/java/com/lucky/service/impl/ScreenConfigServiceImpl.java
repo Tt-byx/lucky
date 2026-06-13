@@ -7,24 +7,50 @@ import com.lucky.mapper.ScreenConfigMapper;
 import com.lucky.service.OssService;
 import com.lucky.service.ScreenConfigService;
 import com.lucky.exception.BusinessException;
+import com.lucky.util.RedisUtil;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 
+import java.util.concurrent.TimeUnit;
+
+/**
+ * 屏幕配置服务实现
+ */
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class ScreenConfigServiceImpl extends ServiceImpl<ScreenConfigMapper, ScreenConfig>
         implements ScreenConfigService {
 
     private final OssService ossService;
+    private final RedisUtil redisUtil;
+
+    /**
+     * 屏幕配置缓存 Key
+     */
+    private static final String SCREEN_CONFIG_KEY = "lucky:screen:config";
 
     @Override
     public ScreenConfig getConfig() {
+        // 先从缓存获取
+        Object cached = redisUtil.get(SCREEN_CONFIG_KEY);
+        if (cached != null && cached instanceof ScreenConfig) {
+            log.debug("从缓存获取屏幕配置");
+            return (ScreenConfig) cached;
+        }
+
+        // 缓存未命中，从数据库查询
         ScreenConfig config = getById(1L);
         if (config == null) {
             config = new ScreenConfig();
             config.setId(1L);
         }
+
+        // 写入缓存（10分钟过期）
+        redisUtil.set(SCREEN_CONFIG_KEY, config, 10, TimeUnit.MINUTES);
+
         return config;
     }
 
@@ -41,6 +67,10 @@ public class ScreenConfigServiceImpl extends ServiceImpl<ScreenConfigMapper, Scr
         config.setBackgroundType(type);
         config.setBackgroundUrl(url);
         saveOrUpdate(config);
+
+        // 清除缓存
+        redisUtil.delete(SCREEN_CONFIG_KEY);
+
         return config;
     }
 
@@ -51,6 +81,9 @@ public class ScreenConfigServiceImpl extends ServiceImpl<ScreenConfigMapper, Scr
         config.setBackgroundType(null);
         config.setBackgroundUrl(null);
         saveOrUpdate(config);
+
+        // 清除缓存
+        redisUtil.delete(SCREEN_CONFIG_KEY);
     }
 
     @Override
@@ -66,6 +99,10 @@ public class ScreenConfigServiceImpl extends ServiceImpl<ScreenConfigMapper, Scr
         config.setMobileBackgroundType(type);
         config.setMobileBackgroundUrl(url);
         saveOrUpdate(config);
+
+        // 清除缓存
+        redisUtil.delete(SCREEN_CONFIG_KEY);
+
         return config;
     }
 
@@ -76,6 +113,9 @@ public class ScreenConfigServiceImpl extends ServiceImpl<ScreenConfigMapper, Scr
         config.setMobileBackgroundType(null);
         config.setMobileBackgroundUrl(null);
         saveOrUpdate(config);
+
+        // 清除缓存
+        redisUtil.delete(SCREEN_CONFIG_KEY);
     }
 
     @Override
@@ -86,5 +126,8 @@ public class ScreenConfigServiceImpl extends ServiceImpl<ScreenConfigMapper, Scr
         config.setDanmakuFontSize(settings.getFontSize());
         config.setDanmakuSpeed(settings.getSpeed());
         saveOrUpdate(config);
+
+        // 清除缓存
+        redisUtil.delete(SCREEN_CONFIG_KEY);
     }
 }
