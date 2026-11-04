@@ -33,14 +33,14 @@
     <!-- 左上角统计信息 - 玻璃拟态风格 -->
     <div class="stats">
       <div class="stat-card">
-        <div class="stat-icon">👥</div>
+        <div class="stat-icon">◈</div>
         <div class="stat-info">
           <div class="stat-value">{{ participantCount }}</div>
           <div class="stat-label">参与人数</div>
         </div>
       </div>
       <div class="stat-card">
-        <div class="stat-icon pulse">🟢</div>
+        <div class="stat-icon pulse">◉</div>
         <div class="stat-info">
           <div class="stat-value">{{ onlineCount }}</div>
           <div class="stat-label">在线人数</div>
@@ -540,17 +540,87 @@ onUnmounted(() => {
      文字回落成黑色、深色渐变背景丢失。管理后台当初就踩过这个坑。 -->
 <style>
 :root {
-  --color-primary: #feca57;
-  --color-secondary: #ff6b6b;
-  --color-accent: #48dbfb;
-  --color-bg-dark: #0a0a1a;
-  --color-bg-medium: #1a1a3a;
-  --color-text-primary: #ffffff;
-  --color-text-secondary: rgba(255, 255, 255, 0.8);
-  --color-text-muted: rgba(255, 255, 255, 0.6);
-  --glass-bg: rgba(255, 255, 255, 0.05);
-  --glass-border: rgba(255, 255, 255, 0.1);
-  --glass-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+  /* ============================================================
+     设计令牌 —— 轻奢雅致（Luxury / refined）
+     毕业典礼现场大屏：仪式感、隆重感、记忆点是「香槟金」
+     ============================================================ */
+
+  /* --- 暖调近黑：不是纯黑，带一点温度 --- */
+  --color-bg-dark: #0e0d0c;
+  --color-bg-medium: #171614;
+  --color-bg-deep: #07070a;
+
+  /* --- 暖白文字：不是纯白，柔化高对比 --- */
+  --color-text-primary: #f5f1ea;
+  --color-text-secondary: rgba(245, 241, 234, 0.78);
+  --color-text-muted: rgba(245, 241, 234, 0.48);
+
+  /* --- 香槟金：唯一的强调色，只给关键动作 --- */
+  --color-primary: #d4af37;
+  --color-primary-bright: #f0c75e;
+  --color-primary-dim: rgba(212, 175, 55, 0.16);
+  --color-primary-glow: rgba(212, 175, 55, 0.32);
+
+  /* --- 赤陶色：极少量的对比色，用于「未抢到」等次要状态 --- */
+  --color-secondary: #c9784f;
+  --color-accent: #d4af37;
+
+  /* --- 玻璃质感：发丝边框 + 环境阴影 --- */
+  --glass-bg: rgba(245, 241, 234, 0.035);
+  --glass-bg-strong: rgba(245, 241, 234, 0.07);
+  --glass-border: rgba(245, 241, 234, 0.10);
+  --glass-border-strong: rgba(245, 241, 234, 0.18);
+  --glass-shadow: 0 24px 64px rgba(0, 0, 0, 0.55);
+  --glass-shadow-soft: 0 8px 28px rgba(0, 0, 0, 0.32);
+
+  /* --- 金色光晕：中奖时刻的仪式感 --- */
+  --glow-gold: 0 0 60px rgba(212, 175, 55, 0.22);
+  --glow-gold-strong: 0 0 120px rgba(212, 175, 55, 0.38);
+
+  /* --- 字体栈：系统衬线，不依赖外部 CDN（避免 F-28 那种白屏） --- */
+  --font-display: Georgia, 'Times New Roman', 'Songti SC', 'STSong', 'SimSun', serif;
+  --font-body: 'PingFang SC', 'Microsoft YaHei', 'Noto Sans SC', sans-serif;
+  --font-mono: 'SF Mono', 'JetBrains Mono', 'Consolas', monospace;
+
+  /* --- 字阶：1.333 完美四度比例 --- */
+  --text-xs: 0.75rem;
+  --text-sm: 0.875rem;
+  --text-base: 1rem;
+  --text-lg: 1.333rem;
+  --text-xl: 1.777rem;
+  --text-2xl: 2.369rem;
+  --text-3xl: 3.157rem;
+  --text-4xl: 4.209rem;
+  --text-5xl: 5.61rem;
+  --text-6xl: 7.478rem;
+
+  /* --- 间距梯度 --- */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 16px;
+  --space-4: 24px;
+  --space-5: 40px;
+  --space-6: 64px;
+  --space-7: 96px;
+
+  /* --- 圆角 --- */
+  --radius-sm: 4px;
+  --radius-md: 10px;
+  --radius-lg: 20px;
+  --radius-xl: 28px;
+
+  /* --- 阴影三级体系（Y 偏移 2 / 8 / 24） --- */
+  --shadow-1: 0 2px 8px rgba(0, 0, 0, 0.24);
+  --shadow-2: 0 8px 28px rgba(0, 0, 0, 0.32);
+  --shadow-3: 0 24px 64px rgba(0, 0, 0, 0.42);
+
+  /* --- 动效 --- */
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+  --dur-fast: 160ms;
+  --dur-base: 320ms;
+  --dur-slow: 640ms;
+  --dur-scene: 800ms;
 }
 </style>
 
@@ -559,11 +629,45 @@ onUnmounted(() => {
 .screen {
   width: 100vw;
   height: 100vh;
-  background: linear-gradient(135deg, var(--color-bg-dark) 0%, var(--color-bg-medium) 50%, var(--color-bg-dark) 100%);
+  /* 暖调近黑 + 三处金色光晕，不是平铺纯色 */
+  background:
+    radial-gradient(70rem 50rem at 12% -12%, rgba(212, 175, 55, 0.14), transparent 62%),
+    radial-gradient(56rem 42rem at 92% 8%, rgba(201, 120, 79, 0.10), transparent 58%),
+    radial-gradient(48rem 48rem at 50% 118%, rgba(212, 175, 55, 0.08), transparent 60%),
+    linear-gradient(168deg, var(--color-bg-dark) 0%, var(--color-bg-medium) 52%, var(--color-bg-deep) 100%);
   color: var(--color-text-primary);
-  font-family: 'PingFang SC', 'Microsoft YaHei', -apple-system, BlinkMacSystemFont, sans-serif;
+  font-family: var(--font-body);
   position: relative;
   overflow: hidden;
+}
+
+/* 颗粒质感层：让平铺背景有「纸感」而不是塑料感 */
+.screen::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 1;
+  opacity: 0.055;
+  mix-blend-mode: overlay;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+
+/* 顶部装饰线：一条极细的金色横线，界定画布边界 */
+.screen::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: linear-gradient(90deg,
+    transparent 0%,
+    rgba(212, 175, 55, 0.55) 18%,
+    rgba(240, 199, 94, 0.85) 50%,
+    rgba(212, 175, 55, 0.55) 82%,
+    transparent 100%);
+  z-index: 2;
 }
 
 /* 粒子背景效果 */
@@ -609,25 +713,55 @@ onUnmounted(() => {
 .stat-card {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 14px;
   background: var(--glass-bg);
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
+  backdrop-filter: blur(24px) saturate(140%);
+  -webkit-backdrop-filter: blur(24px) saturate(140%);
   border: 1px solid var(--glass-border);
-  border-radius: 16px;
-  padding: 16px 24px;
-  box-shadow: var(--glass-shadow);
-  transition: transform 0.3s ease, box-shadow 0.3s ease;
+  /* 发丝边框的「四角括号」：轻奢的细节感 */
+  border-radius: var(--radius-md);
+  padding: 14px 22px;
+  box-shadow: var(--glass-shadow-soft);
+  transition: transform var(--dur-base) var(--ease-out),
+              box-shadow var(--dur-base) var(--ease-out),
+              border-color var(--dur-base) var(--ease-out);
+  position: relative;
+  overflow: hidden;
+}
+
+/* 卡片顶部的一条细金线（呼应屏幕顶部） */
+.stat-card::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: linear-gradient(90deg,
+    transparent,
+    rgba(212, 175, 55, 0.5) 50%,
+    transparent);
+  opacity: 0;
+  transition: opacity var(--dur-base) var(--ease-out);
 }
 
 .stat-card:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.4);
+  transform: translateY(-3px);
+  border-color: var(--glass-border-strong);
+  box-shadow: var(--shadow-2), var(--glow-gold);
+}
+
+.stat-card:hover::before {
+  opacity: 1;
 }
 
 .stat-icon {
-  font-size: 28px;
+  font-family: var(--font-display);
+  font-size: 22px;
   line-height: 1;
+  color: var(--color-primary);
+  text-shadow: 0 0 14px rgba(212, 175, 55, 0.4);
+  opacity: 0.9;
 }
 
 .stat-icon.pulse {
@@ -646,18 +780,23 @@ onUnmounted(() => {
 }
 
 .stat-value {
-  font-size: 24px;
+  font-family: var(--font-display);
+  font-size: var(--text-xl);
   font-weight: 700;
-  color: var(--color-primary);
+  letter-spacing: -0.015em;
+  color: var(--color-text-primary);
   line-height: 1;
-  margin-bottom: 4px;
+  margin-bottom: 5px;
+  font-variant-numeric: tabular-nums;
 }
 
 .stat-label {
-  font-size: 12px;
+  font-family: var(--font-body);
+  font-size: 10px;
+  font-weight: 500;
   color: var(--color-text-muted);
   text-transform: uppercase;
-  letter-spacing: 1px;
+  letter-spacing: 0.22em;
 }
 
 /* 主内容 */
@@ -679,14 +818,35 @@ onUnmounted(() => {
 .qrcode-box {
   position: relative;
   text-align: center;
-  background: var(--glass-bg);
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
-  border-radius: 24px;
-  padding: 40px;
-  border: 1px solid var(--glass-border);
-  box-shadow: var(--glass-shadow);
+  background: var(--glass-bg-strong);
+  backdrop-filter: blur(24px) saturate(140%);
+  -webkit-backdrop-filter: blur(24px) saturate(140%);
+  border-radius: var(--radius-xl);
+  padding: var(--space-6) var(--space-5);
+  border: 1px solid var(--glass-border-strong);
+  box-shadow: var(--shadow-3), var(--glow-gold);
   overflow: hidden;
+  transition: transform var(--dur-slow) var(--ease-out),
+              box-shadow var(--dur-slow) var(--ease-out);
+}
+
+/* 顶部一条金色高光线，界定「这是入口」 */
+.qrcode-box::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 10%;
+  right: 10%;
+  height: 1px;
+  background: linear-gradient(90deg,
+    transparent,
+    rgba(240, 199, 94, 0.8) 50%,
+    transparent);
+}
+
+.qrcode-box:hover {
+  transform: translateY(-4px);
+  box-shadow: var(--shadow-3), var(--glow-gold-strong);
 }
 
 .qrcode-glow {
@@ -709,10 +869,13 @@ onUnmounted(() => {
 }
 
 .qrcode-box h3 {
-  font-size: 24px;
-  font-weight: 600;
-  margin-bottom: 24px;
-  color: var(--color-primary);
+  font-family: var(--font-display);
+  font-size: var(--text-2xl);
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  margin-bottom: var(--space-5);
+  color: var(--color-primary-bright);
+  text-shadow: 0 0 28px rgba(212, 175, 55, 0.36);
   position: relative;
   z-index: 1;
 }
@@ -724,12 +887,13 @@ onUnmounted(() => {
 }
 
 .qrcode-tip {
-  margin-top: 20px;
-  font-size: 14px;
+  margin-top: var(--space-4);
+  font-family: var(--font-body);
+  font-size: var(--text-sm);
   color: var(--color-text-muted);
   position: relative;
   z-index: 1;
-  letter-spacing: 0.5px;
+  letter-spacing: 0.18em;
 }
 
 .right-panel {
@@ -758,17 +922,38 @@ onUnmounted(() => {
 }
 
 .active-round {
-  font-size: 46px;
-  font-weight: 800;
-  color: var(--color-primary);
-  letter-spacing: 2px;
-  text-shadow: 0 4px 24px rgba(254, 202, 87, 0.45);
+  font-family: var(--font-display);
+  font-size: clamp(2.8rem, 5.2vw, var(--text-5xl));
+  font-weight: 700;
+  letter-spacing: -0.022em;
+  line-height: 1.04;
+  color: var(--color-primary-bright);
+  text-shadow:
+    0 0 52px rgba(212, 175, 55, 0.42),
+    0 4px 28px rgba(0, 0, 0, 0.52);
 }
 
 .active-prize {
-  margin-top: 8px;
-  font-size: 20px;
-  color: var(--color-text-muted);
+  /* 奖品才是全场最想要的东西，视觉权重必须够高 */
+  margin-top: var(--space-3);
+  font-family: var(--font-display);
+  font-size: clamp(1.8rem, 3vw, var(--text-3xl));
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  line-height: 1.16;
+  color: var(--color-text-primary);
+  text-shadow: 0 0 36px rgba(212, 175, 55, 0.22);
+}
+
+/* 奖品名下面的一行小字（价值/名额等），用大字距做「高级感」 */
+.active-prize::after {
+  content: "";
+  display: block;
+  width: 64px;
+  height: 2px;
+  margin: var(--space-3) auto 0;
+  background: linear-gradient(90deg, transparent, var(--color-primary), transparent);
+  opacity: 0.72;
 }
 
 /* 三个统计卡片 */
@@ -789,27 +974,34 @@ onUnmounted(() => {
 }
 
 .active-stat.highlight {
-  background: rgba(254, 202, 87, 0.12);
-  border-color: rgba(254, 202, 87, 0.45);
+  background: var(--color-primary-dim);
+  border-color: rgba(212, 175, 55, 0.5);
+  box-shadow: var(--glow-gold);
 }
 
 .active-stat-value {
-  font-size: 40px;
-  font-weight: 800;
-  line-height: 1.1;
+  font-family: var(--font-display);
+  font-size: clamp(2.2rem, 3.4vw, 3.2rem);
+  font-weight: 700;
+  line-height: 1.02;
+  letter-spacing: -0.02em;
   color: var(--color-text-primary);
   font-variant-numeric: tabular-nums;
 }
 
 .active-stat.highlight .active-stat-value {
-  color: var(--color-primary);
+  color: var(--color-primary-bright);
+  text-shadow: 0 0 28px rgba(212, 175, 55, 0.5);
 }
 
 .active-stat-label {
-  margin-top: 6px;
-  font-size: 13px;
+  margin-top: var(--space-2);
+  font-family: var(--font-body);
+  font-size: var(--text-xs);
+  font-weight: 500;
   color: var(--color-text-muted);
-  letter-spacing: 1px;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
 }
 
 /* 中奖者实时列表：名额多的时候要能滚，不能把布局顶破 */
@@ -843,47 +1035,74 @@ onUnmounted(() => {
 .active-winner-row {
   display: flex;
   align-items: center;
-  gap: 18px;
-  padding: 12px 18px;
-  background: rgba(255, 255, 255, 0.06);
+  gap: var(--space-4);
+  padding: var(--space-3) var(--space-4);
+  background: linear-gradient(92deg,
+    rgba(212, 175, 55, 0.10) 0%,
+    rgba(245, 241, 234, 0.03) 42%,
+    transparent 100%);
   border: 1px solid var(--glass-border);
-  border-left: 3px solid var(--color-primary);
-  border-radius: 10px;
-  animation: winnerSlideIn 0.4s ease-out;
+  /* 左侧一条金色竖线，标记「这是中奖者」 */
+  border-left: 3px solid var(--color-primary-bright);
+  border-radius: var(--radius-md);
+  animation: winnerSlideIn var(--dur-base) var(--ease-out);
+  transition: background var(--dur-base) var(--ease-out),
+              box-shadow var(--dur-base) var(--ease-out);
+}
+
+.active-winner-row:hover {
+  background: linear-gradient(92deg,
+    rgba(212, 175, 55, 0.18) 0%,
+    rgba(245, 241, 234, 0.05) 42%,
+    transparent 100%);
+  box-shadow: var(--glow-gold);
 }
 
 @keyframes winnerSlideIn {
-  from { opacity: 0; transform: translateX(-24px); }
-  to { opacity: 1; transform: translateX(0); }
+  from { opacity: 0; transform: translateX(-28px); filter: brightness(1.4); }
+  to { opacity: 1; transform: translateX(0); filter: brightness(1); }
 }
 
 .row-index {
-  width: 30px;
-  font-size: 15px;
+  width: 34px;
+  height: 34px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--font-display);
+  font-size: var(--text-base);
   font-weight: 700;
-  color: var(--color-primary);
-  text-align: center;
+  color: var(--color-primary-bright);
+  border: 1px solid rgba(212, 175, 55, 0.42);
+  border-radius: 50%;
+  background: rgba(212, 175, 55, 0.08);
+  flex-shrink: 0;
 }
 
 .row-name {
   flex: 1;
-  font-size: 20px;
-  font-weight: 600;
+  font-family: var(--font-display);
+  font-size: var(--text-xl);
+  font-weight: 700;
+  letter-spacing: 0.02em;
   color: var(--color-text-primary);
 }
 
 .row-student {
-  font-size: 14px;
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
   color: var(--color-text-muted);
+  letter-spacing: 0.06em;
   font-variant-numeric: tabular-nums;
 }
 
 .row-code {
-  font-size: 15px;
-  font-weight: 600;
-  letter-spacing: 2px;
-  color: var(--color-accent);
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-family: var(--font-mono);
+  font-size: var(--text-lg);
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  color: var(--color-primary-bright);
+  text-shadow: 0 0 18px rgba(212, 175, 55, 0.45);
 }
 
 .active-hint {
@@ -904,32 +1123,59 @@ onUnmounted(() => {
 }
 
 .idle-title {
-  font-size: 48px;
+  /* 衬线大标题：轻奢调性的核心载体。
+     字号上限拉到 8rem，让 1920 大屏上真正有「占满画面」的冲击力。 */
+  font-family: var(--font-display);
+  font-size: clamp(3.6rem, 7.4vw, 8.2rem);
   font-weight: 700;
+  letter-spacing: -0.032em;
+  line-height: 1.0;
   color: var(--color-text-primary);
-  margin-bottom: 16px;
-  text-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+  margin: 0 0 var(--space-5);
+  text-shadow:
+    0 0 56px rgba(212, 175, 55, 0.34),
+    0 6px 36px rgba(0, 0, 0, 0.55);
 }
 
 .idle-subtitle {
-  font-size: 20px;
-  color: var(--color-text-muted);
-  margin-bottom: 60px;
+  font-family: var(--font-body);
+  font-size: var(--text-lg);
+  font-weight: 400;
+  letter-spacing: 0.06em;
+  line-height: 1.7;
+  color: var(--color-text-secondary);
+  margin-bottom: var(--space-7);
+  max-width: 34em;
+  margin-left: auto;
+  margin-right: auto;
 }
 
 .idle-decoration {
   position: relative;
-  width: 200px;
-  height: 200px;
+  width: 320px;
+  height: 320px;
   margin: 0 auto;
+  opacity: 0.62;
 }
 
 .decoration-ring {
   position: absolute;
   inset: 0;
-  border: 2px solid rgba(254, 202, 87, 0.3);
+  border: 1px solid rgba(212, 175, 55, 0.32);
   border-radius: 50%;
-  animation: pulse-ring 3s ease-in-out infinite;
+  animation: pulse-ring 4s ease-in-out infinite;
+}
+
+.decoration-ring.delay-1 {
+  inset: 12%;
+  border-color: rgba(212, 175, 55, 0.22);
+  animation-delay: 0.8s;
+}
+
+.decoration-ring.delay-2 {
+  inset: 24%;
+  border-color: rgba(212, 175, 55, 0.14);
+  animation-delay: 1.6s;
 }
 
 .decoration-ring.delay-1 {
