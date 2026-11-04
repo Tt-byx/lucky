@@ -45,7 +45,7 @@ public class ParticipantServiceImpl extends ServiceImpl<ParticipantMapper, Parti
         participant.setName(dto.getName());
         participant.setPhone(dto.getPhone());
         participant.setStudentId(dto.getStudentId());
-        participant.setStatus(1);
+        participant.setLotteryStatus(1);
 
         try {
             save(participant);

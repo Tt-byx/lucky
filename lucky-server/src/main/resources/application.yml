@@ -11,7 +11,7 @@ spring:
     username: root
     password: ${DB_PASSWORD:123456}
     driver-class-name: com.mysql.cj.jdbc.Driver
-    # HikariCP 连接池配置
+    # HikariCP 连接池配置（高并发优化）
     hikari:
       minimum-idle: 10
       maximum-pool-size: 30
@@ -24,7 +24,6 @@ spring:
     redis:
       host: ${REDIS_HOST:localhost}
       port: ${REDIS_PORT:6379}
-      password: ${REDIS_PASSWORD:}
       database: 0
       timeout: 3000ms
       lettuce:
@@ -33,17 +32,24 @@ spring:
           max-wait: 3000ms
           max-idle: 16
           min-idle: 8
-  # RabbitMQ配置
+  # RabbitMQ配置（消息可靠性：Publisher Confirm + Return）
   rabbitmq:
     host: ${RABBITMQ_HOST:localhost}
     port: ${RABBITMQ_PORT:5672}
     username: ${RABBITMQ_USERNAME:guest}
     password: ${RABBITMQ_PASSWORD:guest}
     virtual-host: /
+    # 发布确认（确保消息到达交换机）
+    publisher-confirm-type: correlated
+    # 发布返回（确保消息路由到队列）
+    publisher-returns: true
     listener:
       simple:
         acknowledge-mode: manual
         prefetch: 10
+        # 消费者并发数（高并发弹幕场景）
+        concurrency: 4
+        max-concurrency: 8
   # Sentinel配置
   cloud:
     sentinel:
@@ -70,6 +76,28 @@ mybatis-plus:
 # 活动配置
 lucky:
   base-url: http://172.27.59.47:5176
+  # 弹幕限流配置
+  danmaku:
+    # 单用户每秒最大弹幕数
+    max-per-second: 1
+    # 批量推送阈值
+    batch-threshold: 50
+    # 批量推送刷新间隔（毫秒）
+    batch-flush-interval: 50
+  # 扫码登录配置
+  scan-login:
+    # 令牌有效期（秒）
+    token-expire-seconds: 7200
+    # 单IP 60秒内最大登录次数
+    max-login-per-60s: 10
+  # 抽奖配置
+  lottery:
+    # 单用户单活动最大中奖次数
+    max-wins-per-user: 1
+    # 分布式锁等待时间（秒）
+    lock-wait-seconds: 3
+    # 分布式锁持有时间（秒）
+    lock-lease-seconds: 30
 
 # 阿里云 OSS 配置
 alibaba:
@@ -78,3 +106,9 @@ alibaba:
     bucket-name: ttbyx
     access-key-id: ${OSS_ACCESS_KEY_ID:}
     access-key-secret: ${OSS_ACCESS_KEY_SECRET:}
+
+# 异步线程池配置
+async:
+  core-pool-size: 10
+  max-pool-size: 50
+  queue-capacity: 1000

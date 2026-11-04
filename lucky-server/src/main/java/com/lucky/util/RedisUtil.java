@@ -94,6 +94,13 @@ public class RedisUtil {
     }
 
     /**
+     * 递减指定值
+     */
+    public Long decrement(String key, long delta) {
+        return redisTemplate.opsForValue().decrement(key, delta);
+    }
+
+    /**
      * 获取Set中的所有成员
      */
     public java.util.Set<Object> setMembers(String key) {

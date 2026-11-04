@@ -66,6 +66,17 @@ public class SecurityConfig {
                         .requestMatchers("/actuator/**").permitAll()
                         // 公开接口 - 登录
                         .requestMatchers("/api/auth/login").permitAll()
+                        // 公开接口 - 扫码登录（移动端用户没有 JWT，凭 Redis 临时令牌鉴权）
+                        .requestMatchers("/api/scan/**").permitAll()
+                        // 公开接口 - WebSocket 在线人数（大屏/移动端轮询）
+                        .requestMatchers("/api/ws/**").permitAll()
+                        // 抢奖接口：用户端没有 JWT，身份由扫码临时令牌在 Controller 内校验
+                        .requestMatchers(HttpMethod.POST, "/api/lottery/join/**").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/api/lottery/result").permitAll()
+                        // 抽奖只读查询：大屏和手机端都要读，属于公开信息
+                        .requestMatchers(HttpMethod.GET, "/api/lottery/rounds").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/api/lottery/winners").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/api/lottery/remaining").permitAll()
                         // 其他接口需要认证
                         .anyRequest().authenticated()
                 )

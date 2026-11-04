@@ -1,5 +1,8 @@
 FROM mysql:8.0
 
+# 强制容器 locale 为 UTF-8，避免初始化时 mysql CLI 客户端回退到 latin1 导致中文数据乱码
+ENV LANG=C.UTF-8
+
 # 复制初始化脚本
 COPY lucky-server/src/main/resources/schema.sql /docker-entrypoint-initdb.d/init.sql
 

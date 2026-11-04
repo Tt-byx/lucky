@@ -37,8 +37,8 @@ public class VOConverter {
         vo.setActivityId(participant.getActivityId());
         vo.setName(participant.getName());
         vo.setStudentId(participant.getStudentId());
-        vo.setStatus(participant.getStatus());
-        vo.setStatusText(getParticipantStatusText(participant.getStatus()));
+        vo.setStatus(participant.getLotteryStatus());
+        vo.setStatusText(getParticipantStatusText(participant.getLotteryStatus()));
         vo.setIsMuted(participant.getIsMuted());
         vo.setIsBanned(participant.getIsBanned());
         vo.setCreatedAt(participant.getCreatedAt());
@@ -78,14 +78,14 @@ public class VOConverter {
     }
 
     /**
-     * 获取参与者状态文本
+     * 获取参与者抽奖资格文本
+     * 注意：这里只表达「能不能参与」，中奖与否由 winner 表决定，不再混进参与者状态
      */
     private static String getParticipantStatusText(Integer status) {
         if (status == null) return "未知";
         return switch (status) {
-            case 1 -> "已参与";
-            case 0 -> "已中奖";
-            case 3 -> "已移除";
+            case 1 -> "可参与";
+            case 3 -> "已移除抽奖";
             default -> "未知";
         };
     }

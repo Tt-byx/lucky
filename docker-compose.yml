@@ -11,8 +11,12 @@ services:
       MYSQL_DATABASE: lucky
       MYSQL_CHARSET: utf8mb4
     ports:
-      - "3306:3306"
+      # 宿主机 3306 已被本机 MySQL 服务占用，改映射到 3307；容器内仍为 3306，后端经内部网络直连
+      - "3307:3306"
     command: --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
+    volumes:
+      # 数据持久化：原编排缺失该卷，容器重建即丢库。如需重置数据执行 docker compose down -v
+      - mysql-data:/var/lib/mysql
     healthcheck:
       test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
       interval: 10s
@@ -39,8 +43,9 @@ services:
     image: rabbitmq:3-management-alpine
     container_name: lucky-rabbitmq
     ports:
-      - "5672:5672"
-      - "15672:15672"
+      # 宿主机 5672/15672 被本机 RabbitMQ 占用；5673-5772 属 Windows 保留区间，故用 5773/15673
+      - "5773:5672"
+      - "15673:15672"
     environment:
       RABBITMQ_DEFAULT_USER: guest
       RABBITMQ_DEFAULT_PASS: guest
@@ -71,6 +76,8 @@ services:
       RABBITMQ_PORT: 5672
       RABBITMQ_USERNAME: guest
       RABBITMQ_PASSWORD: guest
+      OSS_ACCESS_KEY_ID: ${OSS_ACCESS_KEY_ID}
+      OSS_ACCESS_KEY_SECRET: ${OSS_ACCESS_KEY_SECRET}
       BASE_URL: http://101.201.233.194
     ports:
       - "8080:8080"
@@ -97,5 +104,6 @@ services:
     restart: unless-stopped
 
 volumes:
+  mysql-data:
   redis-data:
   rabbitmq-data:

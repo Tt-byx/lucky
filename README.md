@@ -15,11 +15,11 @@
 
 这是一个为大学毕业典礼设计的实时互动抽奖系统，支持：
 
-- 🎯 **实时抽奖**：大屏幕滚动动画，现场氛围感拉满
+- 🎯 **限时抢奖**：每轮绑定奖品与名额，现场倒计时，先到先得
 - 💬 **弹幕互动**：2000人同时发送弹幕，实时显示
 - 📱 **扫码参与**：手机扫码即可注册参与
-- 🔐 **安全认证**：管理后台 JWT 认证，权限控制
-- 🚀 **高性能**：Redis 缓存 + WebSocket 实时通信
+- 🔐 **安全认证**：管理后台 JWT 认证，用户端扫码临时令牌
+- 🚀 **高性能**：Redis 预扣库存 + Lua 原子扣减 + RabbitMQ 异步落库
 
 ---
 
@@ -28,12 +28,14 @@
 ### 🎪 大屏展示端 (lucky-screen)
 - 二维码展示，扫码参与
 - 实时弹幕动画（支持自定义区域、速度、字号）
-- 抽奖滚动动画 + 中奖结果展示
+- 抢奖倒计时 + 剩余名额实时刷新
+- 中奖名单实时滚动展示
 - 在线人数统计
 - 自定义背景（图片/视频）
 
 ### 📱 手机端 (lucky-mobile)
 - 学号快速登录
+- **限时抢奖**：一键抢名额，先到先得
 - 实时弹幕发送
 - 快捷消息（666、恭喜恭喜等）
 - 响应式设计，适配各种手机
@@ -269,6 +271,8 @@ docker-compose up -d
 | POST | /api/participant/register | 参与者注册 |
 | GET | /api/participant/check | 检查是否已注册 |
 | POST | /api/danmaku/send | 发送弹幕 |
+| POST | /api/lottery/join/{roundId} | 抢奖（需扫码令牌） |
+| GET | /api/lottery/result?roundId= | 查询自己是否中奖（需扫码令牌） |
 | GET | /api/screen/config | 获取屏幕配置 |
 
 ### 管理接口（需要认证）
@@ -278,8 +282,9 @@ docker-compose up -d
 | POST | /api/auth/login | 管理员登录 |
 | POST | /api/activity | 创建活动 |
 | PUT | /api/activity/{id}/status | 更新活动状态 |
-| POST | /api/lottery/round | 创建抽奖轮次 |
-| POST | /api/lottery/draw/{roundId} | 开始抽奖 |
+| POST | /api/lottery/round | 创建抽奖轮次（绑定奖品） |
+| POST | /api/lottery/round/{roundId}/start | 开始本轮抢奖 |
+| POST | /api/lottery/round/{roundId}/end | 结束本轮抢奖 |
 | GET | /api/admin/user/list | 获取用户列表 |
 | PUT | /api/admin/user/{id}/mute | 禁言用户 |
 | PUT | /api/admin/user/{id}/ban | 移出直播间 |

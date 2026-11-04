@@ -1,5 +1,9 @@
 FROM maven:3.9.6-eclipse-temurin-17-alpine AS builder
 WORKDIR /app
+
+# 容器内走阿里云镜像，否则 dependency:go-offline 会从中央仓库拉，构建时间不可控
+COPY docker/maven-settings.xml /root/.m2/settings.xml
+
 COPY lucky-server/pom.xml .
 RUN mvn dependency:go-offline -B
 COPY lucky-server/src ./src

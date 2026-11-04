@@ -15,7 +15,7 @@ public class ParticipantVO {
     private String name;
     private String studentId;
     private Integer status;
-    private String statusText; // 状态文本：已参与/已中奖/已移除
+    private String statusText; // 抽奖资格：可参与/已移除抽奖
     private Integer isMuted;
     private Integer isBanned;
     private LocalDateTime createdAt;

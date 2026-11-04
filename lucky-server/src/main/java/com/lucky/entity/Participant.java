@@ -16,8 +16,15 @@ public class Participant {
     private String name;
     private String phone;
     private String studentId;
-    private Integer status;
+
+    /**
+     * 抽奖资格：1可参与 3已移除
+     * 注意：中奖与否不写在这里，由 winner 表表达，避免一个字段承载两种语义
+     */
+    private Integer lotteryStatus;
+
     private Integer isMuted;
     private Integer isBanned;
     private LocalDateTime createdAt;
+    private LocalDateTime updatedAt;
 }

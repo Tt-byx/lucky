@@ -60,14 +60,14 @@ public class SentinelConfig {
         loginRule.setWarmUpPeriodSec(5);
         rules.add(loginRule);
 
-        // 4. 抽奖接口限流 - 每秒最多5次
-        FlowRule drawRule = new FlowRule();
-        drawRule.setResource("POST:/api/lottery/draw/{roundId}");
-        drawRule.setGrade(RuleConstant.FLOW_GRADE_QPS);
-        drawRule.setCount(5);
-        drawRule.setControlBehavior(RuleConstant.CONTROL_BEHAVIOR_WARM_UP);
-        drawRule.setWarmUpPeriodSec(5);
-        rules.add(drawRule);
+        // 4. 抢奖接口限流 - 秒杀入口，阈值要能扛住瞬时并发
+        //    注意：这里刻意不用 WARM_UP，秒杀场景预热期的低阈值会把正常请求挡在外面
+        FlowRule joinRule = new FlowRule();
+        joinRule.setResource("POST:/api/lottery/join/{roundId}");
+        joinRule.setGrade(RuleConstant.FLOW_GRADE_QPS);
+        joinRule.setCount(800);
+        joinRule.setControlBehavior(RuleConstant.CONTROL_BEHAVIOR_DEFAULT);
+        rules.add(joinRule);
 
         // 5. 全局默认限流 - 每秒最多500次
         FlowRule globalRule = new FlowRule();
@@ -109,15 +109,15 @@ public class SentinelConfig {
         registerDegradeRule.setStatIntervalMs(10000); // 统计时间窗口10秒
         rules.add(registerDegradeRule);
 
-        // 3. 抽奖接口熔断 - 异常数
-        DegradeRule drawDegradeRule = new DegradeRule();
-        drawDegradeRule.setResource("POST:/api/lottery/draw/{roundId}");
-        drawDegradeRule.setGrade(RuleConstant.DEGRADE_GRADE_EXCEPTION_COUNT); // 异常数
-        drawDegradeRule.setCount(5); // 异常数超过5个
-        drawDegradeRule.setTimeWindow(30); // 熔断时间窗口30秒
-        drawDegradeRule.setMinRequestAmount(10); // 最少10个请求
-        drawDegradeRule.setStatIntervalMs(10000); // 统计时间窗口10秒
-        rules.add(drawDegradeRule);
+        // 3. 抢奖接口熔断 - 异常数
+        DegradeRule joinDegradeRule = new DegradeRule();
+        joinDegradeRule.setResource("POST:/api/lottery/join/{roundId}");
+        joinDegradeRule.setGrade(RuleConstant.DEGRADE_GRADE_EXCEPTION_COUNT);
+        joinDegradeRule.setCount(20);
+        joinDegradeRule.setTimeWindow(10);
+        joinDegradeRule.setMinRequestAmount(20);
+        joinDegradeRule.setStatIntervalMs(10000);
+        rules.add(joinDegradeRule);
 
         // 4. 登录接口熔断 - 异常数
         DegradeRule loginDegradeRule = new DegradeRule();

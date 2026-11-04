@@ -43,31 +43,65 @@
           </div>
         </div>
 
+        <!-- 活动进行中：奖品配置 -->
+        <div v-if="currentActivity && currentActivity.status === 1" class="card">
+          <h4>奖品配置</h4>
+          <div class="form-row">
+            <input v-model="newPrizeName" type="text" placeholder="奖品名称（如：无线耳机）" />
+            <input v-model.number="newPrizeStock" type="number" min="1" placeholder="数量" style="width: 90px;" />
+            <button @click="createPrize">添加奖品</button>
+          </div>
+          <div v-if="prizes.length > 0" class="prize-list">
+            <span v-for="p in prizes" :key="p.id" class="prize-chip">
+              {{ p.name }} · 剩余 {{ p.stock }} / {{ p.totalStock }}
+            </span>
+          </div>
+          <p v-else class="prize-empty">还没有奖品，先添加奖品才能创建轮次</p>
+        </div>
+
         <!-- 活动进行中：快速抽奖 -->
         <div v-if="currentActivity && currentActivity.status === 1" class="card">
-          <h4>快速抽奖</h4>
+          <h4>限时抢奖</h4>
           <div class="form-row">
+            <select v-model.number="newPrizeId" style="padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+              <option :value="null" disabled>选择奖品</option>
+              <option v-for="p in prizes" :key="p.id" :value="p.id">
+                {{ p.name }}（剩余 {{ p.stock }}）
+              </option>
+            </select>
             <input v-model="newRoundName" type="text" placeholder="奖项名称（如：一等奖）" />
-            <input v-model.number="newWinnerCount" type="number" placeholder="人数" min="1" style="width: 80px;" />
+            <input v-model.number="newWinnerCount" type="number" placeholder="名额" min="1" style="width: 80px;" />
             <button @click="createRound">创建轮次</button>
           </div>
 
           <div v-if="rounds.length > 0" style="margin-top: 16px;">
-            <h5 style="margin-bottom: 10px; color: #666;">抽奖轮次</h5>
+            <h5 style="margin-bottom: 10px; color: #666;">抢奖轮次</h5>
             <div v-for="round in rounds" :key="round.id" class="round-item">
               <div class="round-info">
                 <strong>{{ round.roundName }}</strong>
-                <span>抽取 {{ round.winnerCount }} 人</span>
-                <span :class="round.status === 1 ? 'done' : 'pending'">
-                  {{ round.status === 1 ? '已完成' : '未开始' }}
+                <span>{{ prizeName(round.prizeId) }}</span>
+                <span>名额 {{ round.winnerCount }}</span>
+                <span :class="round.status === 2 ? 'done' : 'pending'">
+                  {{ roundStatusText(round.status) }}
+                </span>
+                <span v-if="round.status === 1" style="color: #e6534a;">
+                  剩余 {{ remainingMap[round.id] ?? '-' }}
                 </span>
               </div>
               <button
                 v-if="round.status === 0"
-                @click="startDraw(round)"
+                @click="startRound(round)"
                 class="btn-draw"
               >
-                开始抽奖
+                开始抢奖
+              </button>
+              <button
+                v-if="round.status === 1"
+                @click="endRound(round)"
+                class="btn-draw"
+                style="background: #888;"
+              >
+                结束本轮
               </button>
             </div>
           </div>
@@ -449,8 +483,13 @@ const participantCount = ref(0)
 // 抽奖相关
 const newRoundName = ref('')
 const newWinnerCount = ref(1)
+const newPrizeId = ref(null)
+const newPrizeName = ref('')
+const newPrizeStock = ref(1)
+const prizes = ref([])
 const rounds = ref([])
 const winnerRecords = ref([])
+const remainingMap = ref({})
 
 // 弹幕相关
 const pendingDanmakus = ref([])
@@ -588,10 +627,14 @@ async function fetchParticipantCount() {
   }
 }
 
-// 创建抽奖轮次
+// 创建抽奖轮次（必须绑定奖品）
 async function createRound() {
   if (!newRoundName.value || !currentActivity.value) {
     alert('请输入轮次名称')
+    return
+  }
+  if (!newPrizeId.value) {
+    alert('请先选择本轮绑定的奖品')
     return
   }
   try {
@@ -600,6 +643,7 @@ async function createRound() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         activityId: currentActivity.value.id,
+        prizeId: newPrizeId.value,
         roundName: newRoundName.value,
         winnerCount: newWinnerCount.value
       })
@@ -609,6 +653,7 @@ async function createRound() {
       rounds.value.push(data.data)
       newRoundName.value = ''
       newWinnerCount.value = 1
+      fetchPrizes()
     } else {
       alert(data.message || '创建失败')
     }
@@ -616,6 +661,130 @@ async function createRound() {
     console.error('创建轮次失败:', e)
     alert('创建失败：' + e.message)
   }
+}
+
+// 添加奖品
+async function createPrize() {
+  if (!currentActivity.value) return
+  if (!newPrizeName.value.trim()) {
+    alert('请输入奖品名称')
+    return
+  }
+  if (!newPrizeStock.value || newPrizeStock.value < 1) {
+    alert('数量至少为 1')
+    return
+  }
+
+  try {
+    const res = await fetch(`${API_BASE}/api/prize`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        activityId: currentActivity.value.id,
+        name: newPrizeName.value.trim(),
+        stock: newPrizeStock.value,
+        totalStock: newPrizeStock.value
+      })
+    })
+    const data = await res.json()
+    if (data.code === 200) {
+      newPrizeName.value = ''
+      newPrizeStock.value = 1
+      fetchPrizes()
+    } else {
+      alert(data.message || '添加失败')
+    }
+  } catch (e) {
+    alert('添加失败：' + e.message)
+  }
+}
+
+// 奖品列表
+async function fetchPrizes() {
+  if (!currentActivity.value) return
+  try {
+    const res = await fetch(`${API_BASE}/api/prize/list?activityId=${currentActivity.value.id}`)
+    const data = await res.json()
+    if (data.code === 200) {
+      prizes.value = data.data || []
+    }
+  } catch (e) {
+    console.error('获取奖品失败:', e)
+  }
+}
+
+function prizeName(prizeId) {
+  const p = prizes.value.find(item => item.id === prizeId)
+  return p ? p.name : '未绑定奖品'
+}
+
+function roundStatusText(status) {
+  const map = { 0: '待开始', 1: '抢奖中', 2: '已结束', 3: '已取消' }
+  return map[status] || '未知'
+}
+
+// 开始抢奖（管理端只负责开轮，中奖由用户抢）
+async function startRound(round) {
+  if (!confirm(`确定要开始"${round.roundName}"的抢奖吗？开始后用户可立即点击抢奖。`)) return
+
+  try {
+    const res = await fetch(`${API_BASE}/api/lottery/round/${round.id}/start`, {
+      method: 'POST'
+    })
+    const data = await res.json()
+    if (data.code === 200) {
+      round.status = 1
+      fetchRemaining(round.id)
+      fetchRounds()
+    } else {
+      alert(data.message || '开始失败')
+    }
+  } catch (e) {
+    alert('开始失败')
+  }
+}
+
+// 结束本轮
+async function endRound(round) {
+  if (!confirm(`确定要结束"${round.roundName}"吗？结束后用户将无法继续抢奖。`)) return
+
+  try {
+    const res = await fetch(`${API_BASE}/api/lottery/round/${round.id}/end`, {
+      method: 'POST'
+    })
+    const data = await res.json()
+    if (data.code === 200) {
+      round.status = 2
+      fetchRounds()
+    } else {
+      alert(data.message || '结束失败')
+    }
+  } catch (e) {
+    alert('结束失败')
+  }
+}
+
+// 查询剩余名额
+async function fetchRemaining(roundId) {
+  try {
+    const res = await fetch(`${API_BASE}/api/lottery/remaining?roundId=${roundId}`)
+    const data = await res.json()
+    if (data.code === 200) {
+      remainingMap.value = { ...remainingMap.value, [roundId]: data.data }
+    }
+  } catch (e) {
+    console.error(e)
+  }
+}
+
+// 轮询进行中轮次的剩余名额
+let remainingTimer = null
+function startRemainingPolling() {
+  if (remainingTimer) return
+  remainingTimer = setInterval(() => {
+    const active = rounds.value.filter(r => r.status === 1)
+    active.forEach(r => fetchRemaining(r.id))
+  }, 2000)
 }
 
 // 获取轮次列表
@@ -626,34 +795,11 @@ async function fetchRounds() {
     const data = await res.json()
     if (data.code === 200) {
       rounds.value = data.data
+      startRemainingPolling()
+      rounds.value.filter(r => r.status === 1).forEach(r => fetchRemaining(r.id))
     }
   } catch (e) {
     console.error(e)
-  }
-}
-
-// 开始抽奖
-async function startDraw(round) {
-  if (!confirm(`确定要开始"${round.roundName}"的抽奖吗？`)) return
-
-  try {
-    const res = await fetch(`${API_BASE}/api/lottery/draw/${round.id}`, {
-      method: 'POST'
-    })
-    const data = await res.json()
-    if (data.code === 200) {
-      round.status = 1
-      winnerRecords.value = data.data.map(p => ({
-        id: p.id,
-        participantName: p.name,
-        studentId: p.studentId
-      }))
-      alert('抽奖完成！')
-    } else {
-      alert(data.message || '抽奖失败')
-    }
-  } catch (e) {
-    alert('抽奖失败')
   }
 }
 
@@ -1226,6 +1372,7 @@ onMounted(() => {
   fetchCurrentActivity().then(() => {
     // 加载当前 tab 的数据（刷新后 watch 不触发，需手动加载）
     // 部分 tab 依赖 currentActivity，需等其加载完成
+    fetchPrizes()
     const tab = currentTab.value
     if (tab === 'danmaku') fetchPendingDanmakus()
     if (tab === 'screen') fetchScreenConfig()
@@ -1239,8 +1386,8 @@ onMounted(() => {
 })
 </script>
 
-<style scoped>
-/* 设计系统 - 管理后台 */
+<style>
+/* 全局 CSS 变量（必须在非 scoped 样式中） */
 :root {
   --color-primary: #3b82f6;
   --color-primary-dark: #2563eb;
@@ -1262,6 +1409,9 @@ onMounted(() => {
   --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
   --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
 }
+</style>
+
+<style scoped>
 
 * {
   margin: 0;
@@ -2072,5 +2222,28 @@ onMounted(() => {
     display: block;
     overflow-x: auto;
   }
+}
+
+/* 奖品配置 */
+.prize-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.prize-chip {
+  padding: 4px 10px;
+  background: #f5f3ff;
+  border: 1px solid #ddd6fe;
+  border-radius: 12px;
+  font-size: 13px;
+  color: #5b21b6;
+}
+
+.prize-empty {
+  margin-top: 10px;
+  font-size: 13px;
+  color: #999;
 }
 </style>

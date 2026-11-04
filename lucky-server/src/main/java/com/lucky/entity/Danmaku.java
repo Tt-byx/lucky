@@ -1,6 +1,7 @@
 package com.lucky.entity;
 
 import com.baomidou.mybatisplus.annotation.IdType;
+import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
 import lombok.Data;
@@ -23,4 +24,8 @@ public class Danmaku {
     private Integer status; // 0待审核 1已通过 2已拒绝
 
     private LocalDateTime createdAt;
+
+    /** 非持久化字段：批量入库重试次数 */
+    @TableField(exist = false)
+    private Integer retryCount;
 }

@@ -9,6 +9,9 @@ import java.time.LocalDateTime;
 
 /**
  * 奖品实体
+ *
+ * total_stock 是配置总量（不可变），stock 是剩余库存（抢奖实时扣减）。
+ * 两者分离的价值：既能做库存对账，也能在出现超卖时快速定位是哪一轮扣多了。
  */
 @Data
 @TableName("prize")
@@ -38,7 +41,12 @@ public class Prize {
     private String description;
 
     /**
-     * 库存数量
+     * 总库存（配置值，不可变）
+     */
+    private Integer totalStock;
+
+    /**
+     * 剩余库存（抢奖实时扣减）
      */
     private Integer stock;
 

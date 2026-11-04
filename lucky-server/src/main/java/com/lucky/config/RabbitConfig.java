@@ -2,7 +2,6 @@ package com.lucky.config;
 
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.amqp.core.*;
-import org.springframework.amqp.rabbit.config.SimpleRabbitListenerContainerFactory;
 import org.springframework.amqp.rabbit.connection.ConnectionFactory;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.amqp.support.converter.Jackson2JsonMessageConverter;
@@ -14,60 +13,39 @@ import java.util.HashMap;
 import java.util.Map;
 
 /**
- * RabbitMQ配置类（支持消息可靠性）
+ * RabbitMQ 配置（消息可靠性）
+ *
+ * 关于队列 TTL 的修正说明：
+ * 原实现给三个业务队列都设了 x-message-ttl=30s。
+ * 这是典型的反模式——消息在队列里排队超过 30 秒就会被直接投进死信队列，
+ * 弹幕高峰期一积压，大量「完全正常」的消息会被误杀。
+ * TTL 只应该用在延迟队列上，业务队列靠「消费失败 + basicNack(requeue=false)」进死信即可。
  */
 @Slf4j
 @Configuration
 public class RabbitConfig {
 
-    /**
-     * 弹幕队列
-     */
+    // ==================== 弹幕 ====================
     public static final String DANMAKU_QUEUE = "lucky.danmaku.queue";
-
-    /**
-     * 弹幕交换机
-     */
     public static final String DANMAKU_EXCHANGE = "lucky.danmaku.exchange";
-
-    /**
-     * 弹幕路由键
-     */
     public static final String DANMAKU_ROUTING_KEY = "lucky.danmaku.routing";
 
-    /**
-     * 抽奖结果队列
-     */
+    // ==================== 抢奖 ====================
+    public static final String LOTTERY_JOIN_QUEUE = "lucky.lottery.join.queue";
+    public static final String LOTTERY_JOIN_EXCHANGE = "lucky.lottery.join.exchange";
+    public static final String LOTTERY_JOIN_ROUTING_KEY = "lucky.lottery.join.routing";
+
+    // ==================== 抽奖结果广播 ====================
     public static final String LOTTERY_RESULT_QUEUE = "lucky.lottery.result.queue";
-
-    /**
-     * 抽奖结果交换机
-     */
     public static final String LOTTERY_RESULT_EXCHANGE = "lucky.lottery.result.exchange";
-
-    /**
-     * 抽奖结果路由键
-     */
     public static final String LOTTERY_RESULT_ROUTING_KEY = "lucky.lottery.result.routing";
 
-    /**
-     * 在线人数队列
-     */
+    // ==================== 在线人数 ====================
     public static final String ONLINE_COUNT_QUEUE = "lucky.online.count.queue";
-
-    /**
-     * 在线人数交换机
-     */
     public static final String ONLINE_COUNT_EXCHANGE = "lucky.online.count.exchange";
-
-    /**
-     * 在线人数路由键
-     */
     public static final String ONLINE_COUNT_ROUTING_KEY = "lucky.online.count.routing";
 
-    /**
-     * 死信队列
-     */
+    // ==================== 死信 ====================
     public static final String DEAD_LETTER_QUEUE = "lucky.dead.letter.queue";
     public static final String DEAD_LETTER_EXCHANGE = "lucky.dead.letter.exchange";
     public static final String DEAD_LETTER_ROUTING_KEY = "lucky.dead.letter.routing";
@@ -89,16 +67,13 @@ public class RabbitConfig {
         return BindingBuilder.bind(deadLetterQueue).to(deadLetterExchange).with(DEAD_LETTER_ROUTING_KEY);
     }
 
-    // ==================== 弹幕相关（带死信） ====================
+    // ==================== 弹幕队列（带死信，不设 TTL） ====================
 
     @Bean
     public Queue danmakuQueue() {
         Map<String, Object> args = new HashMap<>();
-        // 绑定死信交换机
         args.put("x-dead-letter-exchange", DEAD_LETTER_EXCHANGE);
         args.put("x-dead-letter-routing-key", DEAD_LETTER_ROUTING_KEY);
-        // 消息TTL（30秒）
-        args.put("x-message-ttl", 30000);
         return QueueBuilder.durable(DANMAKU_QUEUE).withArguments(args).build();
     }
 
@@ -112,14 +87,33 @@ public class RabbitConfig {
         return BindingBuilder.bind(danmakuQueue).to(danmakuExchange).with(DANMAKU_ROUTING_KEY);
     }
 
-    // ==================== 抽奖结果相关（带死信） ====================
+    // ==================== 抢奖队列（带死信，不设 TTL） ====================
+
+    @Bean
+    public Queue lotteryJoinQueue() {
+        Map<String, Object> args = new HashMap<>();
+        args.put("x-dead-letter-exchange", DEAD_LETTER_EXCHANGE);
+        args.put("x-dead-letter-routing-key", DEAD_LETTER_ROUTING_KEY);
+        return QueueBuilder.durable(LOTTERY_JOIN_QUEUE).withArguments(args).build();
+    }
+
+    @Bean
+    public DirectExchange lotteryJoinExchange() {
+        return new DirectExchange(LOTTERY_JOIN_EXCHANGE);
+    }
+
+    @Bean
+    public Binding lotteryJoinBinding(Queue lotteryJoinQueue, DirectExchange lotteryJoinExchange) {
+        return BindingBuilder.bind(lotteryJoinQueue).to(lotteryJoinExchange).with(LOTTERY_JOIN_ROUTING_KEY);
+    }
+
+    // ==================== 抽奖结果队列（带死信，不设 TTL） ====================
 
     @Bean
     public Queue lotteryResultQueue() {
         Map<String, Object> args = new HashMap<>();
         args.put("x-dead-letter-exchange", DEAD_LETTER_EXCHANGE);
         args.put("x-dead-letter-routing-key", DEAD_LETTER_ROUTING_KEY);
-        args.put("x-message-ttl", 30000);
         return QueueBuilder.durable(LOTTERY_RESULT_QUEUE).withArguments(args).build();
     }
 
@@ -133,14 +127,13 @@ public class RabbitConfig {
         return BindingBuilder.bind(lotteryResultQueue).to(lotteryResultExchange).with(LOTTERY_RESULT_ROUTING_KEY);
     }
 
-    // ==================== 在线人数相关（带死信） ====================
+    // ==================== 在线人数队列（带死信，不设 TTL） ====================
 
     @Bean
     public Queue onlineCountQueue() {
         Map<String, Object> args = new HashMap<>();
         args.put("x-dead-letter-exchange", DEAD_LETTER_EXCHANGE);
         args.put("x-dead-letter-routing-key", DEAD_LETTER_ROUTING_KEY);
-        args.put("x-message-ttl", 30000);
         return QueueBuilder.durable(ONLINE_COUNT_QUEUE).withArguments(args).build();
     }
 
@@ -168,7 +161,6 @@ public class RabbitConfig {
         RabbitTemplate template = new RabbitTemplate(connectionFactory);
         template.setMessageConverter(jsonMessageConverter());
 
-        // 启用 Publisher Confirm
         template.setConfirmCallback((correlationData, ack, cause) -> {
             if (!ack) {
                 log.error("消息发送失败: correlationData={}, cause={}", correlationData, cause);
@@ -177,14 +169,11 @@ public class RabbitConfig {
             }
         });
 
-        // 启用 Publisher Return
         template.setReturnsCallback(returned -> {
-            log.error("消息退回: exchange={}, routingKey={}, replyText={}, message={}",
-                    returned.getExchange(), returned.getRoutingKey(),
-                    returned.getReplyText(), returned.getMessage());
+            log.error("消息退回: exchange={}, routingKey={}, replyText={}",
+                    returned.getExchange(), returned.getRoutingKey(), returned.getReplyText());
         });
 
-        // 设置 mandatory 为 true（支持消息退回）
         template.setMandatory(true);
 
         return template;

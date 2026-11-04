@@ -20,6 +20,23 @@ import java.util.List;
 public class PrizeServiceImpl extends ServiceImpl<PrizeMapper, Prize>
         implements PrizeService {
 
+    /**
+     * 新增奖品
+     *
+     * total_stock 是库存回补的上限（increaseStock 的条件是 stock < total_stock），
+     * 如果创建时没传或传 0，回补就会永远不生效。这里统一兜底成当前库存。
+     */
+    @Override
+    public boolean save(Prize entity) {
+        if (entity.getTotalStock() == null || entity.getTotalStock() <= 0) {
+            entity.setTotalStock(entity.getStock() == null ? 0 : entity.getStock());
+        }
+        if (entity.getStock() == null) {
+            entity.setStock(entity.getTotalStock());
+        }
+        return super.save(entity);
+    }
+
     @Override
     public List<Prize> getByActivity(Long activityId) {
         return list(new LambdaQueryWrapper<Prize>()

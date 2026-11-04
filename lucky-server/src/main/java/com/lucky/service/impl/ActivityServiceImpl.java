@@ -88,4 +88,26 @@ public class ActivityServiceImpl extends ServiceImpl<ActivityMapper, Activity>
                 .eq(Activity::getStatus, ActivityStatus.ENDED.getCode())
                 .orderByDesc(Activity::getCreatedAt));
     }
+
+    /**
+     * 更新活动后清除「当前活动」缓存。
+     * 原实现仅在创建时清除缓存，导致「更新状态 / 删除活动」后，
+     * GET /api/activity/current 仍会在最长 5 分钟内返回已被删除或已结束的活动（脏读）。
+     */
+    @Override
+    public boolean updateById(Activity entity) {
+        boolean result = super.updateById(entity);
+        redisUtil.delete(CURRENT_ACTIVITY_KEY);
+        return result;
+    }
+
+    /**
+     * 删除活动后清除「当前活动」缓存
+     */
+    @Override
+    public boolean removeById(java.io.Serializable id) {
+        boolean result = super.removeById(id);
+        redisUtil.delete(CURRENT_ACTIVITY_KEY);
+        return result;
+    }
 }

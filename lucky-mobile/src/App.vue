@@ -35,6 +35,29 @@
         </div>
       </div>
 
+      <!-- 限时抢奖区：只有轮次进行中才出现 -->
+      <div v-if="activeRound" class="seckill-bar">
+        <div class="seckill-head">
+          <span class="seckill-round">{{ activeRound.roundName }}</span>
+          <span class="seckill-prize">{{ activeRound.prizeName }}</span>
+        </div>
+        <div class="seckill-meta">
+          <span>剩余名额 {{ activeRound.remaining ?? '-' }}</span>
+          <span v-if="countdown > 0" class="seckill-countdown">{{ countdown }}s</span>
+        </div>
+        <button
+          class="seckill-btn"
+          :class="{ won: joinState === 'won', lose: joinState === 'lose' }"
+          :disabled="joining || joinState !== 'idle'"
+          @click="joinRound"
+        >
+          <span v-if="joining">抢奖中...</span>
+          <span v-else-if="joinState === 'won'">已抢到，领奖码 {{ joinResult?.claimCode || '生成中' }}</span>
+          <span v-else-if="joinState === 'lose'">未抢到</span>
+          <span v-else>立即抢奖</span>
+        </button>
+      </div>
+
       <!-- 底部输入栏 -->
       <div class="live-input-bar">
         <div class="quick-bar">
@@ -186,6 +209,15 @@ const quickChecking = ref(false)
 const liveMessages = ref([])
 const messageArea = ref(null)
 
+// 抢奖相关
+const participantToken = ref('')
+const activeRound = ref(null)
+const joining = ref(false)
+const joinState = ref('idle')   // idle | won | lose
+const joinResult = ref(null)
+const countdown = ref(0)
+let countdownTimer = null
+
 // 背景配置
 const screenConfig = ref({ mobileBackgroundType: null, mobileBackgroundUrl: null })
 
@@ -292,6 +324,21 @@ function connectWebSocket() {
         case 'lottery_removed':
           alert(msg.data || '您的抽奖资格已被移除')
           break
+        case 'lottery_start':
+          enterRound(msg.data)
+          break
+        case 'lottery_winner':
+          if (activeRound.value && msg.data.roundId === activeRound.value.roundId
+              && msg.data.remaining !== undefined && msg.data.remaining !== null) {
+            activeRound.value.remaining = msg.data.remaining
+          }
+          break
+        case 'lottery_round_end':
+          if (!activeRound.value || msg.data.roundId === activeRound.value.roundId) {
+            stopCountdown()
+            setTimeout(() => { activeRound.value = null }, 3000)
+          }
+          break
       }
     } catch (e) {
       console.error('解析 WebSocket 消息失败:', e)
@@ -332,7 +379,7 @@ async function register() {
   errorMsg.value = ''
 
   try {
-    const res = await fetch(`${API_BASE}/api/participant/register`, {
+    const res = await fetch(`${API_BASE}/api/scan/login`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -343,11 +390,22 @@ async function register() {
     const data = await res.json()
 
     if (data.code === 200) {
-      participant.value = data.data
+      const vo = data.data
+      participant.value = {
+        id: vo.participantId,
+        name: vo.name,
+        studentId: vo.studentId,
+        activityId: vo.activityId
+      }
+      participantToken.value = vo.token
       registered.value = true
-      localStorage.setItem('lucky_participant', JSON.stringify(data.data))
+      localStorage.setItem('lucky_participant', JSON.stringify({
+        ...participant.value,
+        token: vo.token
+      }))
       connectWebSocket()
       fetchScreenConfig()
+      fetchActiveRound()
     } else {
       errorMsg.value = data.message || '注册失败，请重试'
     }
@@ -367,17 +425,37 @@ async function quickEnter() {
   errorMsg.value = ''
 
   try {
-    const res = await fetch(`${API_BASE}/api/participant/check?activityId=${activityId.value}&studentId=${encodeURIComponent(sid)}`)
+    // 统一走扫码登录：已注册用户只传学号即可拿令牌，未注册会提示补姓名
+    const res = await fetch(`${API_BASE}/api/scan/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        activityId: activityId.value,
+        studentId: sid,
+        name: ''
+      })
+    })
     const data = await res.json()
 
-    if (data.code === 200 && data.data) {
-      participant.value = data.data
+    if (data.code === 200) {
+      const vo = data.data
+      participant.value = {
+        id: vo.participantId,
+        name: vo.name,
+        studentId: vo.studentId,
+        activityId: vo.activityId
+      }
+      participantToken.value = vo.token
       registered.value = true
-      localStorage.setItem('lucky_participant', JSON.stringify(data.data))
+      localStorage.setItem('lucky_participant', JSON.stringify({
+        ...participant.value,
+        token: vo.token
+      }))
       connectWebSocket()
       fetchScreenConfig()
+      fetchActiveRound()
     } else {
-      errorMsg.value = '该学号未注册，请先注册'
+      errorMsg.value = data.message || '该学号未注册，请先注册'
       showFullForm.value = true
       form.value.studentId = sid
     }
@@ -385,6 +463,131 @@ async function quickEnter() {
     errorMsg.value = '网络错误，请重试'
   } finally {
     quickChecking.value = false
+  }
+}
+
+// ==================== 抢奖 ====================
+
+// 查询当前进行中的轮次（防止进房时错过了 lottery_start 广播）
+async function fetchActiveRound() {
+  if (!activityId.value) return
+  try {
+    const res = await fetch(`${API_BASE}/api/lottery/rounds?activityId=${activityId.value}`)
+    const data = await res.json()
+    if (data.code === 200) {
+      const active = (data.data || []).find(r => r.status === 1)
+      if (active) {
+        enterRound({
+          roundId: active.id,
+          roundName: active.roundName,
+          prizeName: active.prizeName,
+          quota: active.winnerCount
+        })
+        fetchRemaining(active.id)
+      }
+    }
+  } catch (e) {
+    console.error('查询进行中轮次失败:', e)
+  }
+}
+
+// 进入抢奖状态
+function enterRound(payload) {
+  activeRound.value = {
+    roundId: payload.roundId,
+    roundName: payload.roundName || '限时抢奖',
+    prizeName: payload.prizeName || '',
+    remaining: payload.quota ?? null
+  }
+  joinState.value = 'idle'
+  joinResult.value = null
+  startCountdown(30)
+}
+
+// 倒计时（纯前端体验，真正的截止由服务端库存与轮次状态决定）
+function startCountdown(seconds) {
+  stopCountdown()
+  countdown.value = seconds
+  countdownTimer = setInterval(() => {
+    countdown.value -= 1
+    if (countdown.value <= 0) stopCountdown()
+  }, 1000)
+}
+
+function stopCountdown() {
+  if (countdownTimer) {
+    clearInterval(countdownTimer)
+    countdownTimer = null
+  }
+  countdown.value = 0
+}
+
+// 抢奖
+async function joinRound() {
+  if (!activeRound.value || joining.value || joinState.value !== 'idle') return
+  if (!participantToken.value) {
+    alert('登录已失效，请重新进入')
+    return
+  }
+
+  joining.value = true
+  try {
+    const res = await fetch(`${API_BASE}/api/lottery/join/${activeRound.value.roundId}`, {
+      method: 'POST',
+      headers: { 'Authorization': participantToken.value }
+    })
+    const data = await res.json()
+
+    if (data.code !== 200) {
+      alert(data.message || '抢奖失败')
+      return
+    }
+
+    const result = data.data
+    if (result.code === 1) {
+      joinState.value = 'won'
+      joinResult.value = result
+      if (result.remaining !== undefined && result.remaining !== null) {
+        activeRound.value.remaining = result.remaining
+      }
+      // 领奖码由 MQ 落库后生成，稍等再查一次结果
+      setTimeout(pollResult, 800)
+    } else {
+      joinState.value = 'lose'
+      alert(result.message)
+    }
+  } catch (e) {
+    alert('网络错误，请重试')
+  } finally {
+    joining.value = false
+  }
+}
+
+// 轮询中奖结果，补齐领奖码
+async function pollResult() {
+  if (!activeRound.value) return
+  try {
+    const res = await fetch(`${API_BASE}/api/lottery/result?roundId=${activeRound.value.roundId}`, {
+      headers: { 'Authorization': participantToken.value }
+    })
+    const data = await res.json()
+    if (data.code === 200 && data.data) {
+      joinResult.value = { ...joinResult.value, ...data.data }
+    }
+  } catch (e) {
+    console.error(e)
+  }
+}
+
+async function fetchRemaining(roundId) {
+  try {
+    const res = await fetch(`${API_BASE}/api/lottery/remaining?roundId=${roundId}`)
+    const data = await res.json()
+    if (data.code === 200 && activeRound.value) {
+      activeRound.value.remaining = data.data
+    }
+  } catch (e) {
+    console.error(e)
   }
 }
 
@@ -439,9 +642,11 @@ onMounted(() => {
         const savedParticipant = JSON.parse(saved)
         if (savedParticipant.activityId === activityId.value) {
           participant.value = savedParticipant
+          participantToken.value = savedParticipant.token || ''
           registered.value = true
           connectWebSocket()
           fetchScreenConfig()
+          fetchActiveRound()
         } else {
           localStorage.removeItem('lucky_participant')
           participant.value = {}
@@ -457,6 +662,7 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
+  stopCountdown()
   disconnectWebSocket()
 })
 </script>
@@ -1040,5 +1246,77 @@ onUnmounted(() => {
   .logo-area h1 {
     font-size: 24px;
   }
+}
+
+/* 限时抢奖区 */
+.seckill-bar {
+  margin: 0 12px 8px;
+  padding: 12px 14px;
+  background: rgba(245, 158, 11, 0.12);
+  border: 1px solid rgba(245, 158, 11, 0.45);
+  border-radius: 12px;
+  backdrop-filter: blur(8px);
+}
+
+.seckill-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+
+.seckill-round {
+  font-size: 16px;
+  font-weight: 600;
+  color: #fbbf24;
+}
+
+.seckill-prize {
+  font-size: 13px;
+  color: #fde68a;
+  opacity: 0.9;
+}
+
+.seckill-meta {
+  display: flex;
+  justify-content: space-between;
+  font-size: 12px;
+  color: #fcd34d;
+  margin-bottom: 10px;
+}
+
+.seckill-countdown {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+
+.seckill-btn {
+  width: 100%;
+  padding: 12px;
+  border: none;
+  border-radius: 10px;
+  font-size: 16px;
+  font-weight: 600;
+  color: #1f1300;
+  background: linear-gradient(135deg, #fbbf24, #f59e0b);
+  transition: transform 0.15s ease, opacity 0.15s ease;
+}
+
+.seckill-btn:active:not(:disabled) {
+  transform: scale(0.98);
+}
+
+.seckill-btn:disabled {
+  opacity: 0.75;
+}
+
+.seckill-btn.won {
+  background: linear-gradient(135deg, #34d399, #10b981);
+  color: #04231a;
+}
+
+.seckill-btn.lose {
+  background: #4b5563;
+  color: #e5e7eb;
 }
 </style>

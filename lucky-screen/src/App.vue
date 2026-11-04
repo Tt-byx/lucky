@@ -60,13 +60,13 @@
         </div>
       </div>
 
-      <!-- 右侧：抽奖区域 -->
+      <!-- 右侧：抢奖区域 -->
       <div class="right-panel">
         <!-- 等待状态 -->
         <div v-if="lotteryState === 'idle'" class="lottery-idle">
           <div class="idle-content">
-            <h2 class="idle-title">等待抽奖开始</h2>
-            <p class="idle-subtitle">管理员将在后台发起抽奖</p>
+            <h2 class="idle-title">等待抢奖开始</h2>
+            <p class="idle-subtitle">管理员开启轮次后，打开手机点击「立即抢奖」</p>
             <div class="idle-decoration">
               <div class="decoration-ring"></div>
               <div class="decoration-ring delay-1"></div>
@@ -75,22 +75,46 @@
           </div>
         </div>
 
-        <!-- 抽奖动画区域 -->
-        <div v-if="lotteryState === 'rolling'" class="lottery-rolling">
-          <div class="rolling-container">
-            <div class="rolling-bg"></div>
-            <div class="rolling-names">
-              <div class="rolling-name" :class="{ slowing: lotteryState === 'slowing' }">
-                {{ currentRollingName }}
-              </div>
+        <!-- 抢奖进行中：倒计时 + 实时中奖滚动 -->
+        <div v-if="lotteryState === 'active'" class="lottery-active">
+          <div class="active-header">
+            <h2 class="active-round">{{ activeRound.roundName }}</h2>
+            <p class="active-prize">{{ activeRound.prizeName }}</p>
+          </div>
+
+          <div class="active-stats">
+            <div class="active-stat">
+              <div class="active-stat-value">{{ activeRound.remaining ?? '-' }}</div>
+              <div class="active-stat-label">剩余名额</div>
             </div>
-            <div class="rolling-particles">
-              <div v-for="i in 20" :key="i" class="rolling-particle" :style="getRollingParticleStyle(i)"></div>
+            <div class="active-stat highlight">
+              <div class="active-stat-value">{{ countdown }}</div>
+              <div class="active-stat-label">倒计时</div>
+            </div>
+            <div class="active-stat">
+              <div class="active-stat-value">{{ winnerList.length }}</div>
+              <div class="active-stat-label">已抢到</div>
             </div>
           </div>
+
+          <div class="active-winners">
+            <div v-if="winnerList.length === 0" class="active-empty">等待第一位幸运儿...</div>
+            <div
+              v-for="(w, index) in winnerList"
+              :key="w.participantId"
+              class="active-winner-row"
+            >
+              <span class="row-index">{{ index + 1 }}</span>
+              <span class="row-name">{{ w.participantName }}</span>
+              <span class="row-student">{{ w.studentId }}</span>
+              <span class="row-code">{{ w.claimCode }}</span>
+            </div>
+          </div>
+
+          <p class="active-hint">手机端点击「立即抢奖」，先到先得</p>
         </div>
 
-        <!-- 中奖展示 -->
+        <!-- 本轮结束：完整名单 -->
         <div v-if="lotteryState === 'result'" class="lottery-result">
           <div class="result-container">
             <!-- 背景光效 -->
@@ -99,7 +123,7 @@
             <div class="result-card">
               <div class="result-header">
                 <div class="trophy-icon">🏆</div>
-                <h2>恭喜中奖!</h2>
+                <h2>{{ activeRound.roundName }} 中奖名单</h2>
                 <div class="confetti">
                   <div v-for="i in 30" :key="i" class="confetti-piece" :style="getConfettiStyle(i)"></div>
                 </div>
@@ -107,14 +131,14 @@
 
               <div class="winners-grid">
                 <div
-                  v-for="(w, index) in winners"
-                  :key="w.id"
+                  v-for="(w, index) in winnerList"
+                  :key="w.participantId"
                   class="winner-card"
                   :style="{ animationDelay: index * 0.1 + 's' }"
                 >
                   <div class="winner-rank">{{ index + 1 }}</div>
-                  <div class="winner-avatar">{{ w.name.charAt(0) }}</div>
-                  <div class="winner-name">{{ w.name }}</div>
+                  <div class="winner-avatar">{{ (w.participantName || '幸').charAt(0) }}</div>
+                  <div class="winner-name">{{ w.participantName }}</div>
                   <div class="winner-info">{{ w.studentId }}</div>
                 </div>
               </div>
@@ -163,13 +187,12 @@ const danmakuSettings = ref({
   speed: 10
 })
 
-// 抽奖状态
-const lotteryState = ref('idle') // idle, rolling, result
-const currentRollingName = ref('')
-const winners = ref([])
-let rollingTimer = null
-let rollingNames = []
-let rollingIndex = 0
+// 抢奖状态
+const lotteryState = ref('idle') // idle, active, result
+const activeRound = ref({})
+const winnerList = ref([])
+const countdown = ref(0)
+let countdownTimer = null
 
 // 生成粒子样式
 function getParticleStyle(index) {
@@ -250,10 +273,17 @@ function connectWebSocket() {
             addDanmaku(msg.data)
             break
           case 'lottery_start':
-            startLotteryAnimation()
+            startSeckill(msg.data)
+            break
+          case 'lottery_winner':
+            addWinner(msg.data)
+            break
+          case 'lottery_round_end':
+            finishRound(msg.data)
             break
           case 'lottery_result':
-            showLotteryResult(msg.data)
+            // 兼容旧版广播：直接当成一轮结束
+            finishRound(null)
             break
         }
       } catch (e) {
@@ -321,33 +351,70 @@ function addDanmaku(data) {
   })
 }
 
-// 开始抽奖动画
-function startLotteryAnimation() {
-  lotteryState.value = 'rolling'
-  rollingNames = Array.from({ length: 20 }, (_, i) => `参与者${i + 1}`)
-  rollingIndex = 0
-
-  rollingTimer = setInterval(() => {
-    currentRollingName.value = rollingNames[rollingIndex % rollingNames.length]
-    rollingIndex++
-  }, 80)
-}
-
-// 显示抽奖结果
-function showLotteryResult(data) {
-  if (rollingTimer) {
-    clearInterval(rollingTimer)
-    rollingTimer = null
+// 开始抢奖：进入倒计时状态
+function startSeckill(payload) {
+  if (!payload) return
+  activeRound.value = {
+    roundId: payload.roundId,
+    roundName: payload.roundName || '限时抢奖',
+    prizeName: payload.prizeName || '',
+    remaining: payload.quota ?? null
   }
-  winners.value = data
-  lotteryState.value = 'result'
+  winnerList.value = []
+  lotteryState.value = 'active'
+  startCountdown(30)
 }
 
-// 重置抽奖状态
+function startCountdown(seconds) {
+  stopCountdown()
+  countdown.value = seconds
+  countdownTimer = setInterval(() => {
+    countdown.value -= 1
+    if (countdown.value <= 0) stopCountdown()
+  }, 1000)
+}
+
+function stopCountdown() {
+  if (countdownTimer) {
+    clearInterval(countdownTimer)
+    countdownTimer = null
+  }
+  countdown.value = 0
+}
+
+// 有人抢到：实时追加到大屏
+function addWinner(payload) {
+  if (!payload || payload.roundId !== activeRound.value.roundId) return
+  if (winnerList.value.some(w => w.participantId === payload.participantId)) return
+
+  winnerList.value.push({
+    participantId: payload.participantId,
+    participantName: payload.participantName || '幸运儿',
+    studentId: payload.studentId || '',
+    claimCode: payload.claimCode || ''
+  })
+
+  if (payload.remaining !== undefined && payload.remaining !== null) {
+    activeRound.value.remaining = payload.remaining
+  }
+}
+
+// 本轮结束：切到完整名单
+function finishRound(payload) {
+  if (payload && payload.roundId && payload.roundId !== activeRound.value.roundId) return
+  stopCountdown()
+  if (winnerList.value.length > 0) {
+    lotteryState.value = 'result'
+  } else {
+    lotteryState.value = 'idle'
+  }
+}
+
+// 重置回等待状态
 function resetLottery() {
   lotteryState.value = 'idle'
-  winners.value = []
-  currentRollingName.value = ''
+  activeRound.value = {}
+  winnerList.value = []
 }
 
 // 获取参与人数
@@ -413,7 +480,7 @@ onMounted(() => {
 
 onUnmounted(() => {
   if (ws) ws.close()
-  if (rollingTimer) clearInterval(rollingTimer)
+  stopCountdown()
   if (bgPollTimer) clearInterval(bgPollTimer)
 })
 </script>
