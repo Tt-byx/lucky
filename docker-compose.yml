@@ -106,6 +106,74 @@ services:
       - backend
     restart: unless-stopped
 
+  # ==================== 多实例验证（profile: multinode） ====================
+  # 默认不启动。验证水平扩容时用：
+  #   docker compose --profile multinode up -d --build backend-a backend-b
+  # 两个实例共享同一套 mysql/redis/rabbitmq，端口分别映射到 8081/8082，
+  # 测试脚本直接连这两个端口，能明确区分「用户在实例 A、大屏在实例 B」。
+  # 用完清理：docker compose --profile multinode down backend-a backend-b
+  backend-a:
+    profiles: ["multinode"]
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.backend
+    container_name: lucky-backend-a
+    environment:
+      DB_HOST: mysql
+      DB_PORT: 3306
+      DB_NAME: lucky
+      DB_USERNAME: root
+      DB_PASSWORD: 123456
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PORT: 5672
+      RABBITMQ_USERNAME: guest
+      RABBITMQ_PASSWORD: guest
+    ports:
+      - "8081:8080"
+    volumes:
+      - uploads-data:/app/uploads
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    restart: unless-stopped
+
+  backend-b:
+    profiles: ["multinode"]
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.backend
+    container_name: lucky-backend-b
+    environment:
+      DB_HOST: mysql
+      DB_PORT: 3306
+      DB_NAME: lucky
+      DB_USERNAME: root
+      DB_PASSWORD: 123456
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PORT: 5672
+      RABBITMQ_USERNAME: guest
+      RABBITMQ_PASSWORD: guest
+    ports:
+      - "8082:8080"
+    volumes:
+      - uploads-data:/app/uploads
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    restart: unless-stopped
+
 volumes:
   mysql-data:
   redis-data:
