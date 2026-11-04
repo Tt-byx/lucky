@@ -1488,25 +1488,66 @@ onMounted(() => {
 <style>
 /* 全局 CSS 变量（必须在非 scoped 样式中） */
 :root {
-  --color-primary: #3b82f6;
-  --color-primary-dark: #2563eb;
-  --color-success: #10b981;
-  --color-warning: #f59e0b;
-  --color-danger: #ef4444;
-  --color-bg: #f8fafc;
-  --color-sidebar: #0f172a;
-  --color-sidebar-active: rgba(59, 130, 246, 0.2);
-  --color-card: #ffffff;
-  --color-border: #e2e8f0;
-  --color-text: #1e293b;
-  --color-text-secondary: #64748b;
-  --color-text-muted: #94a3b8;
+  /* ============================================================
+     管理后台设计令牌 —— 与大屏/手机端统一的「暗夜香槟金」
+     调性：工业实用（Industrial）—— 高密度信息、等宽数字、发丝边框
+     ============================================================ */
+
+  /* --- 暖调近黑 --- */
+  --color-bg: #0e0d0c;
+  --color-bg-light: #171614;
+  --color-bg-deep: #07070a;
+
+  /* --- 卡片/侧边栏 --- */
+  --color-card: #171614;
+  --color-card-hover: #1e1c19;
+  --color-sidebar: #0a0a09;
+  --color-sidebar-active: rgba(212, 175, 55, 0.16);
+
+  /* --- 香槟金：唯一强调色 --- */
+  --color-primary: #d4af37;
+  --color-primary-dark: #a8872a;
+  --color-primary-bright: #f0c75e;
+  --color-primary-dim: rgba(212, 175, 55, 0.14);
+
+  /* --- 语义色：与香槟金同族，不刺眼 --- */
+  --color-success: #8ba86a;
+  --color-warning: #d4af37;
+  --color-danger: #c9784f;
+
+  /* --- 发丝边框 --- */
+  --color-border: rgba(245, 241, 234, 0.10);
+  --color-border-strong: rgba(245, 241, 234, 0.18);
+
+  /* --- 暖白文字 --- */
+  --color-text: #f5f1ea;
+  --color-text-secondary: rgba(245, 241, 234, 0.78);
+  --color-text-muted: rgba(245, 241, 234, 0.46);
+
+  /* --- 字体栈：数据密集界面用等宽数字 --- */
+  --font-display: Georgia, 'Times New Roman', 'Songti SC', 'STSong', 'SimSun', serif;
+  --font-body: 'PingFang SC', 'Microsoft YaHei', 'Noto Sans SC', sans-serif;
+  --font-mono: 'SF Mono', 'JetBrains Mono', 'Consolas', monospace;
+
   --radius-sm: 6px;
   --radius-md: 10px;
   --radius-lg: 14px;
-  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.05);
-  --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
-  --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
+  --radius-xl: 20px;
+
+  /* --- 阴影三级（深色背景下带环境色） --- */
+  --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.28);
+  --shadow-md: 0 8px 28px rgba(0, 0, 0, 0.34);
+  --shadow-lg: 0 24px 64px rgba(0, 0, 0, 0.42);
+
+  /* --- 金色光晕 --- */
+  --glow-gold: 0 0 24px rgba(212, 175, 55, 0.18);
+  --glow-gold-strong: 0 0 48px rgba(212, 175, 55, 0.32);
+
+  /* --- 动效 --- */
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --dur-fast: 160ms;
+  --dur-base: 320ms;
+  --dur-slow: 640ms;
 }
 </style>
 
@@ -1541,11 +1582,31 @@ onMounted(() => {
 
 .login-card {
   width: 100%;
-  max-width: 400px;
-  background: rgba(255, 255, 255, 0.98);
-  border-radius: 16px;
-  padding: 36px 32px 32px;
-  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.45);
+  max-width: 420px;
+  /* 深色玻璃：与大屏/手机端统一的「暗夜香槟金」调性 */
+  background: linear-gradient(168deg,
+    rgba(245, 241, 234, 0.06) 0%,
+    rgba(245, 241, 234, 0.03) 100%);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-xl);
+  padding: 40px 36px 36px;
+  box-shadow: var(--shadow-lg), var(--glow-gold);
+  backdrop-filter: blur(24px) saturate(140%);
+  -webkit-backdrop-filter: blur(24px) saturate(140%);
+}
+
+/* 顶部金色高光线 */
+.login-card::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 12%;
+  right: 12%;
+  height: 1px;
+  background: linear-gradient(90deg,
+    transparent,
+    rgba(240, 199, 94, 0.7) 50%,
+    transparent);
 }
 
 .login-brand {
@@ -1599,8 +1660,8 @@ onMounted(() => {
 .login-form input:focus {
   outline: none;
   border-color: var(--color-primary);
-  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15);
-  background: #fff;
+  box-shadow: 0 0 0 3px var(--color-primary-dim), var(--glow-gold);
+  background: var(--color-card-hover);
 }
 
 .login-error {
@@ -1615,16 +1676,24 @@ onMounted(() => {
 
 .login-form button[type="submit"] {
   width: 100%;
-  padding: 12px;
+  padding: 13px;
   border: none;
-  border-radius: 8px;
-  background: var(--color-primary);
-  color: #fff;
+  border-radius: var(--radius-md);
+  /* 香槟金主按钮：深色文字保证对比度 */
+  background: linear-gradient(148deg,
+    var(--color-primary-bright) 0%,
+    var(--color-primary) 52%,
+    var(--color-primary-dark) 100%);
+  color: #1f1400;
+  font-family: var(--font-display);
   font-size: 15px;
-  font-weight: 600;
+  font-weight: 700;
+  letter-spacing: 0.14em;
   cursor: pointer;
-  letter-spacing: 1px;
-  transition: background 0.15s;
+  box-shadow: var(--shadow-sm), var(--glow-gold);
+  transition: filter var(--dur-fast) ease-out,
+              transform var(--dur-fast) ease-out,
+              box-shadow var(--dur-fast) ease-out;
 }
 
 .login-form button[type="submit"]:hover:not(:disabled) {
@@ -1663,10 +1732,27 @@ onMounted(() => {
 .sidebar {
   width: 240px;
   background: var(--color-sidebar);
-  color: #fff;
+  color: var(--color-text);
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
+  position: relative;
+  /* 顶部一条金色细线，与大屏/手机端的视觉语言统一 */
+  border-right: 1px solid var(--color-border);
+}
+
+.sidebar::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: linear-gradient(90deg,
+    transparent,
+    rgba(212, 175, 55, 0.6) 50%,
+    transparent);
+  z-index: 1;
 }
 
 .sidebar-header {
@@ -1692,13 +1778,23 @@ onMounted(() => {
   display: flex;
   align-items: center;
   padding: 12px 16px;
-  color: rgba(255, 255, 255, 0.6);
+  color: var(--color-text-muted);
   text-decoration: none;
   cursor: pointer;
-  transition: all 0.2s ease;
+  transition: color var(--dur-fast) ease-out,
+              background var(--dur-fast) ease-out,
+              padding-left var(--dur-fast) ease-out;
   border-radius: var(--radius-md);
+  font-family: var(--font-body);
   font-size: 14px;
   font-weight: 500;
+  letter-spacing: 0.02em;
+}
+
+.sidebar-nav a:hover {
+  color: var(--color-primary-bright);
+  background: var(--color-primary-dim);
+  padding-left: 20px;
 }
 
 .sidebar-nav a:hover {
@@ -1708,7 +1804,10 @@ onMounted(() => {
 
 .sidebar-nav a.active {
   background: var(--color-sidebar-active);
-  color: #3b82f6;
+  color: var(--color-primary-bright);
+  /* 左侧一条金色竖线，标记当前项 */
+  box-shadow: inset 3px 0 0 var(--color-primary);
+  font-weight: 600;
 }
 
 /* 主内容 */
@@ -1730,11 +1829,41 @@ onMounted(() => {
 .card {
   background: var(--color-card);
   border-radius: var(--radius-lg);
-  padding: 24px;
+  padding: var(--space-4, 24px) 24px;
   margin-bottom: 20px;
   border: 1px solid var(--color-border);
   box-shadow: var(--shadow-sm);
-  transition: box-shadow 0.2s ease;
+  transition: box-shadow var(--dur-base) var(--ease-out),
+              border-color var(--dur-base) var(--ease-out),
+              transform var(--dur-base) var(--ease-out);
+  position: relative;
+  overflow: hidden;
+}
+
+/* 卡片顶部的一条金色高光线（与大屏的视觉语言统一） */
+.card::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 8%;
+  right: 8%;
+  height: 1px;
+  background: linear-gradient(90deg,
+    transparent,
+    rgba(212, 175, 55, 0.4) 50%,
+    transparent);
+  opacity: 0;
+  transition: opacity var(--dur-base) var(--ease-out);
+}
+
+.card:hover {
+  box-shadow: var(--shadow-md), var(--glow-gold);
+  border-color: var(--color-border-strong);
+  transform: translateY(-2px);
+}
+
+.card:hover::before {
+  opacity: 1;
 }
 
 .card:hover {
