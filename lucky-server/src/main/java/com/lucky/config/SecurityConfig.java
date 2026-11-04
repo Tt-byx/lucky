@@ -51,8 +51,12 @@ public class SecurityConfig {
                         // 公开接口 - 活动查询
                         .requestMatchers(HttpMethod.GET, "/api/activity/current").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/activity/history").permitAll()
-                        // 公开接口 - 参与者
-                        .requestMatchers("/api/participant/**").permitAll()
+                        // 参与者相关：只开放「注册」和「人数统计」。
+                        // 原来这里是 /api/participant/** 全放行，后果是匿名就能拉
+                        // /api/participant/list 拿到全场 2000 人的姓名、学号、手机号，
+                        // 属于明确的数据泄露。list 现在落到 anyRequest().authenticated()。
+                        .requestMatchers(HttpMethod.POST, "/api/participant/register").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/api/participant/count").permitAll()
                         // 公开接口 - 弹幕发送
                         .requestMatchers(HttpMethod.POST, "/api/danmaku/send").permitAll()
                         // 公开接口 - 屏幕配置查询

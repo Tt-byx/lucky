@@ -35,6 +35,31 @@ public class SensitiveWordServiceImpl extends ServiceImpl<SensitiveWordMapper, S
     private static final String SENSITIVE_WORDS_LOCK_KEY = "lucky:sensitive:lock";
 
     /**
+     * 进程内缓存
+     *
+     * 原来 containsSensitiveWord 每调用一次都会走 getAllWords()，
+     * 也就是每条弹幕都要 SMEMBERS 把整个词表拉回来一次。
+     * 弹幕是最高频的写路径（现场几百条每秒），这个开销比匹配本身大得多。
+     * 这里改成进程内缓存 60 秒：改动敏感词后最多 60 秒生效，对现场完全够用。
+     */
+    private volatile List<String> localWords = java.util.Collections.emptyList();
+    private volatile long localWordsLoadedAt = 0L;
+    private static final long LOCAL_CACHE_TTL_MS = 60_000L;
+
+    private List<String> currentWords() {
+        long now = System.currentTimeMillis();
+        if (localWordsLoadedAt == 0L || now - localWordsLoadedAt > LOCAL_CACHE_TTL_MS) {
+            synchronized (this) {
+                if (localWordsLoadedAt == 0L || now - localWordsLoadedAt > LOCAL_CACHE_TTL_MS) {
+                    localWords = getAllWords();
+                    localWordsLoadedAt = now;
+                }
+            }
+        }
+        return localWords;
+    }
+
+    /**
      * 获取敏感词列表（带Redis缓存 + 分布式锁）
      */
     @Override
@@ -105,10 +130,13 @@ public class SensitiveWordServiceImpl extends ServiceImpl<SensitiveWordMapper, S
 
     /**
      * 清除缓存（增删改时调用）
+     *
+     * 必须同时清掉进程内缓存，否则改完敏感词要等 60 秒才生效。
      */
     public void clearCache() {
         redisUtil.delete(SENSITIVE_WORDS_KEY);
-        log.info("敏感词Redis缓存已清除");
+        localWordsLoadedAt = 0L;
+        log.info("敏感词缓存已清除（Redis + 本地）");
     }
 
     @Override
@@ -117,7 +145,8 @@ public class SensitiveWordServiceImpl extends ServiceImpl<SensitiveWordMapper, S
             return false;
         }
         String lowerContent = content.toLowerCase();
-        for (String word : getAllWords()) {
+        // 走进程内缓存，不再每条弹幕都打一次 Redis
+        for (String word : currentWords()) {
             if (lowerContent.contains(word)) {
                 return true;
             }
@@ -131,7 +160,7 @@ public class SensitiveWordServiceImpl extends ServiceImpl<SensitiveWordMapper, S
             return content;
         }
         String result = content;
-        for (String word : getAllWords()) {
+        for (String word : currentWords()) {
             // 替换所有匹配的敏感词（不区分大小写）
             result = result.replaceAll("(?i)" + word, "***");
         }

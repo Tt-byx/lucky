@@ -53,6 +53,14 @@ public class LuckyWebSocketHandler extends TextWebSocketHandler {
     private final ConcurrentHashMap<Long, Set<String>> activitySessionMap = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, Long> sessionActivityMap = new ConcurrentHashMap<>();
 
+    /**
+     * 没有声明场次的连接（大屏、监控端）。
+     *
+     * 大屏在 onMounted 时就建连，此时活动信息还没拉回来，拿不到 activityId。
+     * 如果只按场次推送，大屏就永远收不到弹幕和抢奖广播——所以这类连接按「全量监听」处理。
+     */
+    private final Set<String> unscopedSessions = ConcurrentHashMap.newKeySet();
+
     // ==================== 在线计数 ====================
 
     /** 本机在线人数，仅用于日志与本地状态判断；全局人数从 Redis Set 取 */
@@ -126,43 +134,53 @@ public class LuckyWebSocketHandler extends TextWebSocketHandler {
         sessionMap.put(session.getId(), session);
 
         URI uri = session.getUri();
-        if (uri != null && uri.getQuery() != null) {
-            Map<String, String> params = parseQuery(uri.getQuery());
+        Map<String, String> params = (uri != null && uri.getQuery() != null)
+                ? parseQuery(uri.getQuery())
+                : Collections.emptyMap();
 
-            String activityIdStr = params.get("activityId");
-            Long activityId = null;
-            if (activityIdStr != null) {
-                try {
-                    activityId = Long.parseLong(activityIdStr);
-                    sessionActivityMap.put(session.getId(), activityId);
-                    activitySessionMap.computeIfAbsent(activityId, k -> ConcurrentHashMap.newKeySet())
-                            .add(session.getId());
-                } catch (NumberFormatException e) {
-                    log.warn("无效的 activityId: {}", activityIdStr);
-                }
-            }
-
-            // 用户身份只认握手拦截器写进 attributes 的值，不再信任 query 里的 participantId
-            Object pidAttr = session.getAttributes().get("participantId");
-            if (pidAttr instanceof Long participantId) {
-                sessionUserMap.put(session.getId(), participantId);
-                userSessionMap.computeIfAbsent(participantId, k -> ConcurrentHashMap.newKeySet())
+        String activityIdStr = params.get("activityId");
+        Long activityId = null;
+        if (activityIdStr != null) {
+            try {
+                activityId = Long.parseLong(activityIdStr);
+                sessionActivityMap.put(session.getId(), activityId);
+                activitySessionMap.computeIfAbsent(activityId, k -> ConcurrentHashMap.newKeySet())
                         .add(session.getId());
-
-                redisUtil.setAdd(ONLINE_USERS_KEY, participantId.toString());
-                localOnlineCount.incrementAndGet();
-
-                if (activityId != null) {
-                    String activityCountKey = ACTIVITY_ONLINE_COUNT_KEY + activityId;
-                    redisUtil.increment(activityCountKey);
-                    redisUtil.expire(activityCountKey, 24, TimeUnit.HOURS);
-                }
-
-                updateHeartbeat(session.getId());
+            } catch (NumberFormatException e) {
+                log.warn("无效的 activityId: {}", activityIdStr);
             }
         }
 
-        log.info("WebSocket 连接建立: session={}, 本机在线={}", session.getId(), localOnlineCount.get());
+        // 没有场次的连接 = 大屏/监控端，按全量监听处理，否则收不到任何场次广播
+        if (activityId == null) {
+            unscopedSessions.add(session.getId());
+        }
+
+        // 所有连接都要先写一次心跳记录。
+        // 大屏连接没有 participantId，原先只在下面的 if 分支里写心跳，
+        // 导致大屏永远没有心跳记录，30 秒后的清理任务会把它当僵尸连接踢掉
+        // （现场表现：大屏每分钟断线重连一次，期间收不到任何弹幕和抢奖广播）。
+        updateHeartbeat(session.getId());
+
+        // 用户身份只认握手拦截器写进 attributes 的值，不再信任 query 里的 participantId
+        Object pidAttr = session.getAttributes().get("participantId");
+        if (pidAttr instanceof Long participantId) {
+            sessionUserMap.put(session.getId(), participantId);
+            userSessionMap.computeIfAbsent(participantId, k -> ConcurrentHashMap.newKeySet())
+                    .add(session.getId());
+
+            redisUtil.setAdd(ONLINE_USERS_KEY, participantId.toString());
+            localOnlineCount.incrementAndGet();
+
+            if (activityId != null) {
+                String activityCountKey = ACTIVITY_ONLINE_COUNT_KEY + activityId;
+                redisUtil.increment(activityCountKey);
+                redisUtil.expire(activityCountKey, 24, TimeUnit.HOURS);
+            }
+        }
+
+        log.info("WebSocket 连接建立: session={}, activityId={}, 本机在线={}",
+                session.getId(), activityId, localOnlineCount.get());
     }
 
     // ==================== 连接关闭 ====================
@@ -176,6 +194,7 @@ public class LuckyWebSocketHandler extends TextWebSocketHandler {
     private void doClose(String sessionId) {
         Long participantId = sessionUserMap.remove(sessionId);
         sessionMap.remove(sessionId);
+        unscopedSessions.remove(sessionId);
 
         Long activityId = sessionActivityMap.remove(sessionId);
         if (activityId != null) {
@@ -277,25 +296,39 @@ public class LuckyWebSocketHandler extends TextWebSocketHandler {
         }
 
         Set<String> sessionIds = activitySessionMap.get(activityId);
-        if (sessionIds == null || sessionIds.isEmpty()) {
+        boolean hasScoped = sessionIds != null && !sessionIds.isEmpty();
+        // 大屏这类无场次连接也要收，否则大屏看不到弹幕和抢奖过程
+        if (!hasScoped && unscopedSessions.isEmpty()) {
             return;
         }
 
         TextMessage textMessage = buildMessage(type, data);
-        for (String sessionId : sessionIds) {
-            WebSocketSession session = sessionMap.get(sessionId);
-            if (session != null && session.isOpen()) {
-                CompletableFuture.runAsync(() -> {
-                    synchronized (session) {
-                        try {
-                            session.sendMessage(textMessage);
-                        } catch (IOException | IllegalStateException e) {
-                            log.error("场次推送失败: session={}, activityId={}", sessionId, activityId, e);
-                        }
-                    }
-                }, broadcastExecutor);
+
+        if (hasScoped) {
+            for (String sessionId : sessionIds) {
+                pushOne(sessionId, textMessage, "场次推送失败: activityId=" + activityId);
             }
         }
+        for (String sessionId : unscopedSessions) {
+            pushOne(sessionId, textMessage, "大屏推送失败");
+        }
+    }
+
+    /** 向单个连接异步推送；session 上的 synchronized 是因为 Tomcat 的 WS 会话不支持并发发送 */
+    private void pushOne(String sessionId, TextMessage textMessage, String errorPrefix) {
+        WebSocketSession session = sessionMap.get(sessionId);
+        if (session == null || !session.isOpen()) {
+            return;
+        }
+        CompletableFuture.runAsync(() -> {
+            synchronized (session) {
+                try {
+                    session.sendMessage(textMessage);
+                } catch (IOException | IllegalStateException e) {
+                    log.error("{}, session={}", errorPrefix, sessionId, e);
+                }
+            }
+        }, broadcastExecutor);
     }
 
     /**
@@ -384,7 +417,9 @@ public class LuckyWebSocketHandler extends TextWebSocketHandler {
         }
 
         Set<String> sessionIds = activitySessionMap.get(activityId);
-        if (sessionIds == null || sessionIds.isEmpty()) {
+        boolean hasScoped = sessionIds != null && !sessionIds.isEmpty();
+        // 大屏没有 activityId，只按场次推会一条弹幕都收不到
+        if (!hasScoped && unscopedSessions.isEmpty()) {
             return;
         }
 
@@ -393,19 +428,13 @@ public class LuckyWebSocketHandler extends TextWebSocketHandler {
         batchMsg.put("data", messages);
         TextMessage textMessage = new TextMessage(batchMsg.toJSONString());
 
-        for (String sessionId : sessionIds) {
-            WebSocketSession session = sessionMap.get(sessionId);
-            if (session != null && session.isOpen()) {
-                CompletableFuture.runAsync(() -> {
-                    synchronized (session) {
-                        try {
-                            session.sendMessage(textMessage);
-                        } catch (IOException | IllegalStateException e) {
-                            log.error("批量推送失败: session={}", sessionId, e);
-                        }
-                    }
-                }, broadcastExecutor);
+        if (hasScoped) {
+            for (String sessionId : sessionIds) {
+                pushOne(sessionId, textMessage, "批量推送失败");
             }
+        }
+        for (String sessionId : unscopedSessions) {
+            pushOne(sessionId, textMessage, "大屏弹幕推送失败");
         }
     }
 
@@ -443,8 +472,19 @@ public class LuckyWebSocketHandler extends TextWebSocketHandler {
 
     // ==================== 心跳与僵尸连接清理 ====================
 
+    /**
+     * 心跳过期时间。
+     * 前端每 25 秒发一次 ping，这里给 90 秒的宽限，
+     * 能容忍一次网络抖动或一次 GC 停顿而不至于把正常连接误杀。
+     */
+    private static final long HEARTBEAT_TTL_SECONDS = 90;
+
+    /** 判定僵尸连接的超时时间，必须小于心跳 TTL，否则 key 先过期就永远判不出来 */
+    private static final long HEARTBEAT_TIMEOUT_MS = 90_000;
+
     private void updateHeartbeat(String sessionId) {
-        redisUtil.set(ONLINE_HEARTBEAT_KEY + sessionId, System.currentTimeMillis(), 60, TimeUnit.SECONDS);
+        redisUtil.set(ONLINE_HEARTBEAT_KEY + sessionId, System.currentTimeMillis(),
+                HEARTBEAT_TTL_SECONDS, TimeUnit.SECONDS);
     }
 
     @Scheduled(fixedRate = 30000)
@@ -462,9 +502,25 @@ public class LuckyWebSocketHandler extends TextWebSocketHandler {
             }
 
             Object heartbeat = redisUtil.get(ONLINE_HEARTBEAT_KEY + sessionId);
-            if (heartbeat == null || now - Long.parseLong(heartbeat.toString()) > 60000) {
+            if (heartbeat == null) {
                 toRemove.add(sessionId);
-                log.warn("心跳超时，关闭连接: sessionId={}", sessionId);
+                log.warn("心跳记录缺失，关闭连接: sessionId={}", sessionId);
+                continue;
+            }
+
+            // 单个坏值不能让整轮清理中断，否则所有僵尸连接会一直留着
+            long last;
+            try {
+                last = Long.parseLong(heartbeat.toString());
+            } catch (NumberFormatException e) {
+                toRemove.add(sessionId);
+                log.warn("心跳值格式异常，关闭连接: sessionId={}, value={}", sessionId, heartbeat);
+                continue;
+            }
+
+            if (now - last > HEARTBEAT_TIMEOUT_MS) {
+                toRemove.add(sessionId);
+                log.warn("心跳超时，关闭连接: sessionId={}, 距上次={}ms", sessionId, now - last);
             }
         }
 

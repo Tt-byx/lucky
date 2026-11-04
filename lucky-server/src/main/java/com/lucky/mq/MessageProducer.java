@@ -3,11 +3,16 @@ package com.lucky.mq;
 import com.lucky.config.RabbitConfig;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.amqp.AmqpException;
+import org.springframework.amqp.rabbit.connection.CorrelationData;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.stereotype.Component;
 
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 
 /**
  * 消息生产者
@@ -24,15 +29,42 @@ public class MessageProducer {
     private final RabbitTemplate rabbitTemplate;
 
     /**
-     * 发送抢奖消息（失败抛出，调用方负责回滚预扣）
+     * 发送抢奖消息（必须确认到达 broker，失败抛出由调用方回滚预扣）
+     *
+     * 这里刻意不用裸的 convertAndSend：
+     * 它只保证消息写进了 TCP 发送缓冲区，broker 有没有收到是另一回事。
+     * 一旦消息在半路丢了（broker 重启、网络中断、队列满了被拒），
+     * 调用方拿不到任何异常，Redis 里预扣的那个名额就永远不会还回来，
+     * 现场表现就是「明明还有奖，但每个人都提示抢完了」。
+     *
+     * 所以这里同步等 publisher confirm：nack 或超时都抛异常，让上层回滚。
      */
     public void sendJoin(Map<String, Object> joinData) {
+        String messageId = String.valueOf(joinData.get("messageId"));
+        CorrelationData correlation = new CorrelationData(messageId);
+
         rabbitTemplate.convertAndSend(
                 RabbitConfig.LOTTERY_JOIN_EXCHANGE,
                 RabbitConfig.LOTTERY_JOIN_ROUTING_KEY,
-                joinData
+                joinData,
+                correlation
         );
-        log.debug("抢奖消息已发送: roundId={}, participantId={}",
+
+        try {
+            CorrelationData.Confirm confirm = correlation.getFuture().get(3, TimeUnit.SECONDS);
+            if (confirm != null && !confirm.isAck()) {
+                throw new AmqpException("抢奖消息被 broker 拒绝: " + confirm.getReason());
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new AmqpException("等待抢奖消息确认被中断", e);
+        } catch (TimeoutException e) {
+            throw new AmqpException("等待抢奖消息确认超时（3 秒），按未送达处理", e);
+        } catch (ExecutionException e) {
+            throw new AmqpException("等待抢奖消息确认失败", e.getCause());
+        }
+
+        log.debug("抢奖消息已确认到达: roundId={}, participantId={}",
                 joinData.get("roundId"), joinData.get("participantId"));
     }
 

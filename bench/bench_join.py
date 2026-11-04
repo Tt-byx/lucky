@@ -62,6 +62,8 @@ def mysql_exec(sql):
 def prepare_participants(activity_id, count):
     """批量插入参与者，返回 [(participantId, token)]"""
     sql = (
+        # MySQL 的 CTE 递归深度默认只有 1000，2000 人的场景要先放开
+        "SET SESSION cte_max_recursion_depth = 100000; "
         "INSERT INTO participant (activity_id, name, student_id, lottery_status, is_muted, is_banned) "
         "WITH RECURSIVE seq AS (SELECT 1 AS n UNION ALL SELECT n+1 FROM seq WHERE n < %d) "
         "SELECT %d, CONCAT('压测用户', n), CONCAT('BENCH%d_', LPAD(n,5,'0')), 1, 0, 0 FROM seq;"

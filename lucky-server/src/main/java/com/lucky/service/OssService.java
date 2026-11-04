@@ -1,6 +1,7 @@
 package com.lucky.service;
 
 import com.aliyun.oss.OSS;
+import com.lucky.util.FileUploadUtil;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
@@ -33,12 +34,15 @@ public class OssService {
             throw new IllegalStateException("OSS 未配置，无法上传文件");
         }
 
-        String originalFilename = file.getOriginalFilename();
-        String extension = "";
-        if (originalFilename != null && originalFilename.contains(".")) {
-            extension = originalFilename.substring(originalFilename.lastIndexOf("."));
+        // 与本地存储同一套校验：扩展名白名单 + 文件头验真 + 大小上限。
+        // 落盘（对象名）的扩展名也只取真实类型，不采用用户提供的文件名。
+        // 否则上传一个伪装成 image/png 的 .html，会被存成 xxx.html 并以 text/html 返回 —— 存储型 XSS。
+        String safeExtension = FileUploadUtil.detectSafeExtension(file);
+        if (safeExtension == null) {
+            throw new IllegalArgumentException("文件类型不支持或超出大小限制");
         }
-        String objectName = "lucky/background/" + UUID.randomUUID() + extension;
+
+        String objectName = "lucky/background/" + UUID.randomUUID() + safeExtension;
 
         try (InputStream inputStream = file.getInputStream()) {
             ossClient.putObject(bucketName, objectName, inputStream);

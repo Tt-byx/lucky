@@ -89,6 +89,16 @@ public class RateLimitAspect {
 
     /**
      * 获取客户端真实 IP（处理反向代理场景）
+     *
+     * 取值顺序很关键，不能先用 X-Forwarded-For 的第一个：
+     * nginx 用的是 `$proxy_add_x_forwarded_for`，它会「追加」而不是覆盖，
+     * 所以攻击者只要在请求头里自带 `X-Forwarded-For: 1.2.3.4`，
+     * 取第一个就会拿到伪造值，每换一个值就是一个全新的限流桶，限流直接失效。
+     *
+     * 正确顺序：
+     *   1. X-Real-IP           —— nginx 用 $remote_addr 直接设置，客户端改不了
+     *   2. X-Forwarded-For 末尾 —— 追加段的最后一个是最近一跳看到的真实来源
+     *   3. getRemoteAddr       —— 没有代理时的兜底
      */
     private String getClientIp() {
         try {
@@ -97,24 +107,30 @@ public class RateLimitAspect {
             if (attributes == null) return "unknown";
 
             HttpServletRequest request = attributes.getRequest();
-            String ip = request.getHeader("X-Forwarded-For");
-            if (ip == null || ip.isEmpty() || "unknown".equalsIgnoreCase(ip)) {
-                ip = request.getHeader("X-Real-IP");
+
+            String realIp = request.getHeader("X-Real-IP");
+            if (isValidIp(realIp)) {
+                return realIp.trim();
             }
-            if (ip == null || ip.isEmpty() || "unknown".equalsIgnoreCase(ip)) {
-                ip = request.getHeader("Proxy-Client-IP");
+
+            String forwarded = request.getHeader("X-Forwarded-For");
+            if (isValidIp(forwarded)) {
+                String[] parts = forwarded.split(",");
+                for (int i = parts.length - 1; i >= 0; i--) {
+                    if (isValidIp(parts[i])) {
+                        return parts[i].trim();
+                    }
+                }
             }
-            if (ip == null || ip.isEmpty() || "unknown".equalsIgnoreCase(ip)) {
-                ip = request.getRemoteAddr();
-            }
-            // 多级代理时取第一个
-            if (ip != null && ip.contains(",")) {
-                ip = ip.split(",")[0].trim();
-            }
-            return ip != null ? ip : "unknown";
+
+            return request.getRemoteAddr();
         } catch (Exception e) {
             return "unknown";
         }
+    }
+
+    private boolean isValidIp(String ip) {
+        return ip != null && !ip.isEmpty() && !"unknown".equalsIgnoreCase(ip.trim());
     }
 
     /**

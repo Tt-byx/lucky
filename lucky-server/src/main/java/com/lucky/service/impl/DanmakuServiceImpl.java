@@ -1,8 +1,10 @@
 package com.lucky.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.lucky.annotation.RateLimit;
+import com.lucky.constant.RedisKeys;
 import com.lucky.dto.DanmakuDTO;
 import com.lucky.entity.Danmaku;
 import com.lucky.entity.Participant;
@@ -109,37 +111,41 @@ public class DanmakuServiceImpl extends ServiceImpl<DanmakuMapper, Danmaku>
     }
 
     /**
-     * 校验参与者状态（禁言/移出），Redis 缓存优先
+     * 取参与者（带对象缓存）
+     *
+     * 弹幕是最高频写路径，原来 checkParticipantStatus 缓存未命中要查一次 DB，
+     * buildDanmakuMessage 取姓名又要再查一次 —— 同一条请求两次 selectById。
+     * 姓名和禁言状态都是低频变更的数据，缓存 30 分钟足够，禁言/踢人时由管理端主动清掉。
+     */
+    private Participant getParticipantCached(Long participantId) {
+        if (participantId == null) {
+            return null;
+        }
+        String key = RedisKeys.participantObject(participantId);
+        Object cached = redisUtil.get(key);
+        if (cached instanceof Participant) {
+            return (Participant) cached;
+        }
+        Participant p = participantMapper.selectById(participantId);
+        if (p != null) {
+            redisUtil.set(key, p, 30, TimeUnit.MINUTES);
+        }
+        return p;
+    }
+
+    /**
+     * 校验参与者状态（禁言/移出）
      */
     private void checkParticipantStatus(Long participantId) {
-        String cacheKey = com.lucky.constant.RedisKeys.participantStatus(participantId);
-
-        // 尝试从缓存获取状态
-        Object cached = redisUtil.get(cacheKey);
-        if (cached != null) {
-            String status = cached.toString();
-            if ("muted".equals(status)) {
-                throw new BusinessException("您已被禁言，无法发送弹幕");
-            }
-            if ("banned".equals(status)) {
-                throw new BusinessException("您已被移出直播间");
-            }
-            return; // 缓存命中且状态正常
+        Participant sender = getParticipantCached(participantId);
+        if (sender == null) {
+            return;
         }
-
-        // 缓存未命中，查询 DB 并回写缓存
-        Participant sender = participantMapper.selectById(participantId);
-        if (sender != null) {
-            if (sender.getIsMuted() != null && sender.getIsMuted() == 1) {
-                redisUtil.set(cacheKey, "muted", 1, TimeUnit.HOURS);
-                throw new BusinessException("您已被禁言，无法发送弹幕");
-            }
-            if (sender.getIsBanned() != null && sender.getIsBanned() == 1) {
-                redisUtil.set(cacheKey, "banned", 1, TimeUnit.HOURS);
-                throw new BusinessException("您已被移出直播间");
-            }
-            // 状态正常，缓存正常标记
-            redisUtil.set(cacheKey, "normal", 1, TimeUnit.HOURS);
+        if (sender.getIsMuted() != null && sender.getIsMuted() == 1) {
+            throw new BusinessException("您已被禁言，无法发送弹幕");
+        }
+        if (sender.getIsBanned() != null && sender.getIsBanned() == 1) {
+            throw new BusinessException("您已被移出直播间");
         }
     }
 
@@ -154,9 +160,9 @@ public class DanmakuServiceImpl extends ServiceImpl<DanmakuMapper, Danmaku>
         message.put(FIELD_STATUS, 1); // 自动审核通过
         message.put(FIELD_TIMESTAMP, System.currentTimeMillis());
 
-        // 预查询发送者名称（用于大屏展示，避免消费者重复查 DB）
+        // 复用上面的对象缓存，正常路径不会再打 DB
         if (dto.getParticipantId() != null) {
-            Participant p = participantMapper.selectById(dto.getParticipantId());
+            Participant p = getParticipantCached(dto.getParticipantId());
             message.put(FIELD_PARTICIPANT_NAME, p != null ? p.getName() : "匿名");
         } else {
             message.put(FIELD_PARTICIPANT_NAME, "匿名");
@@ -180,10 +186,41 @@ public class DanmakuServiceImpl extends ServiceImpl<DanmakuMapper, Danmaku>
     }
 
     @Override
-    public List<Danmaku> getApprovedDanmakus(Long activityId) {
-        return list(new LambdaQueryWrapper<Danmaku>()
+    public List<Danmaku> getApprovedDanmakus(Long activityId, Long participantId) {
+        LambdaQueryWrapper<Danmaku> qw = new LambdaQueryWrapper<Danmaku>()
                 .eq(Danmaku::getActivityId, activityId)
-                .eq(Danmaku::getStatus, 1)
-                .orderByDesc(Danmaku::getCreatedAt));
+                .eq(Danmaku::getStatus, 1);
+        if (participantId != null) {
+            qw.eq(Danmaku::getParticipantId, participantId);
+        }
+        // 一场活动几千条弹幕，一次全返回会把管理端拖垮；查发言记录看最近的足够了
+        qw.orderByDesc(Danmaku::getId).last("LIMIT 200");
+        return list(qw);
+    }
+
+    @Override
+    public java.util.Map<Long, Long> countByParticipant(Long activityId) {
+        // 一次 group by 给出全部结果，替代「前端对每人拉一次全量弹幕再 filter」
+        List<java.util.Map<String, Object>> rows = getBaseMapper().selectMaps(
+                new QueryWrapper<Danmaku>()
+                        .select("participant_id", "COUNT(*) AS cnt")
+                        .eq("activity_id", activityId)
+                        .eq("status", 1)
+                        .isNotNull("participant_id")
+                        .groupBy("participant_id")
+        );
+
+        java.util.Map<Long, Long> result = new HashMap<>();
+        for (java.util.Map<String, Object> row : rows) {
+            Object pid = row.get("participant_id");
+            Object cnt = row.get("cnt");
+            if (pid != null && cnt != null) {
+                try {
+                    result.put(Long.parseLong(pid.toString()), Long.parseLong(cnt.toString()));
+                } catch (NumberFormatException ignored) {
+                }
+            }
+        }
+        return result;
     }
 }

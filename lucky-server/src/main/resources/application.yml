@@ -25,6 +25,12 @@ spring:
       max-lifetime: 1800000
       connection-timeout: 30000
       connection-test-query: SELECT 1
+  # 定时任务线程池：默认单线程会让对账任务卡住在线人数广播与连接清理
+  task:
+    scheduling:
+      pool:
+        size: 4
+      thread-name-prefix: lucky-sched-
   # Redis配置
   data:
     redis:

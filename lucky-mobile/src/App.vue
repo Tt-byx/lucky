@@ -58,6 +58,22 @@
         </button>
       </div>
 
+      <!-- 中奖结果常驻卡片
+           轮次结束后 activeRound 会在 3 秒后被置空，整个 .seckill-bar 随之消失，
+           中奖者就再也看不到自己的领奖码了。这里与轮次状态解耦，只要中奖就一直保留。 -->
+      <div v-if="!activeRound && joinState === 'won'" class="my-prize-card">
+        <div class="my-prize-emoji">🎉</div>
+        <div class="my-prize-title">恭喜中奖</div>
+        <div class="my-prize-sub">{{ joinResult?.prizeName || '奖品' }}</div>
+        <div class="my-prize-code">{{ joinResult?.claimCode || '生成中...' }}</div>
+        <div class="my-prize-tip">凭此领奖码到领奖台兑换</div>
+      </div>
+
+      <!-- 未抢到提示，同样不随轮次消失而丢失 -->
+      <div v-else-if="!activeRound && joinState === 'lose'" class="my-lose-card">
+        这一轮没抢到，下一轮手速再快一点 💪
+      </div>
+
       <!-- 底部输入栏 -->
       <div class="live-input-bar">
         <div class="quick-bar">
@@ -183,8 +199,13 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
 
-const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:8080'
-const WS_URL = import.meta.env.VITE_WS_URL || 'ws://localhost:8080/ws/lucky'
+// 空字符串表示「同源」，由 nginx 把 /api/ 与 /ws/ 代理到后端；
+// 开发环境 .env.development 会覆盖成 http://localhost:8080。
+// 不能用 `||`：空字符串是 falsy，会静默回落到 localhost，生产环境就打到用户自己电脑了。
+const API_BASE = import.meta.env.VITE_API_BASE ?? ''
+// WebSocket 地址按当前页面的协议和主机推导，避免写死 IP（换环境就要重新打包）
+const WS_URL = import.meta.env.VITE_WS_URL
+  || `${location.protocol === 'https:' ? 'wss:' : 'ws:'}//${location.host}/ws/lucky`
 
 // 状态
 const loading = ref(true)
@@ -224,6 +245,8 @@ const screenConfig = ref({ mobileBackgroundType: null, mobileBackgroundUrl: null
 // WebSocket
 let ws = null
 let reconnectTimer = null
+let heartbeatTimer = null
+let wsClosedByUs = false
 
 const quickMessages = [
   '太棒了！', '恭喜恭喜！', '加油！', '666', '中奖！',
@@ -287,29 +310,42 @@ async function fetchScreenConfig() {
 function connectWebSocket() {
   if (ws && ws.readyState === WebSocket.OPEN) return
 
+  // 重新连接时要把「主动关闭」标志复位，否则断一次之后就再也连不回来了
+  wsClosedByUs = false
+
   // 握手需要带扫码令牌，后端会用它反查身份，防止冒充
   const url = `${WS_URL}?participantId=${participant.value.id}&activityId=${activityId.value}&token=${encodeURIComponent(participantToken.value || '')}`
   ws = new WebSocket(url)
 
   ws.onopen = () => {
     console.log('WebSocket 连接成功')
+    // 每 25 秒发一次心跳。服务端 90 秒收不到心跳就判定为僵尸连接并断开，
+    // 原先前端从不发 ping，导致长连接被周期性掐断、错过抢奖广播。
+    if (heartbeatTimer) clearInterval(heartbeatTimer)
+    heartbeatTimer = setInterval(() => {
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send('ping')
+      }
+    }, 25000)
   }
 
   ws.onmessage = (event) => {
+    // 心跳响应是纯文本 "pong"，不是 JSON；不拦掉会每条心跳抛一次解析异常
+    if (event.data === 'pong') return
     try {
       const msg = JSON.parse(event.data)
       switch (msg.type) {
         case 'danmaku':
-          liveMessages.value.push({
-            sender: msg.data.participantName || '匿名',
-            content: msg.data.content
-          })
-          if (liveMessages.value.length > 100) {
-            liveMessages.value = liveMessages.value.slice(-100)
-          }
-          nextTick(() => {
-            if (messageArea.value) {
-              messageArea.value.scrollTop = messageArea.value.scrollHeight
+          appendLiveMessage(msg.data)
+          break
+        case 'danmaku_batch':
+          // 服务端批量推送，data 是 JSON 字符串数组；缺这个分支手机端会漏掉绝大多数弹幕
+          (msg.data || []).forEach(raw => {
+            try {
+              const inner = typeof raw === 'string' ? JSON.parse(raw) : raw
+              if (inner && inner.data) appendLiveMessage(inner.data)
+            } catch (e) {
+              console.error('弹幕批量解析失败:', e, raw)
             }
           })
           break
@@ -347,6 +383,12 @@ function connectWebSocket() {
   }
 
   ws.onclose = () => {
+    if (heartbeatTimer) {
+      clearInterval(heartbeatTimer)
+      heartbeatTimer = null
+    }
+    // 主动关闭（页面卸载/切活动）时不要再重连，否则定时器会一直循环
+    if (wsClosedByUs) return
     console.log('WebSocket 断开，3秒后重连')
     if (reconnectTimer) clearTimeout(reconnectTimer)
     reconnectTimer = setTimeout(connectWebSocket, 3000)
@@ -359,9 +401,14 @@ function connectWebSocket() {
 
 // 断开 WebSocket
 function disconnectWebSocket() {
+  wsClosedByUs = true
   if (reconnectTimer) {
     clearTimeout(reconnectTimer)
     reconnectTimer = null
+  }
+  if (heartbeatTimer) {
+    clearInterval(heartbeatTimer)
+    heartbeatTimer = null
   }
   if (ws) {
     ws.close()
@@ -553,6 +600,9 @@ async function joinRound() {
       }
       // 领奖码由 MQ 落库后生成，稍等再查一次结果
       setTimeout(pollResult, 800)
+    } else if (result.code === -6) {
+      // 点击过快：这不等于没抢到，按钮要保持可点，否则用户会误以为自己落选了
+      alert(result.message)
     } else {
       joinState.value = 'lose'
       alert(result.message)
@@ -592,6 +642,24 @@ async function fetchRemaining(roundId) {
   }
 }
 
+// 往直播间消息流里追加一条弹幕
+// 单条（danmaku）和批量（danmaku_batch）两个分支共用，避免逻辑两处维护
+function appendLiveMessage(data) {
+  if (!data || !data.content) return
+  liveMessages.value.push({
+    sender: data.participantName || '匿名',
+    content: data.content
+  })
+  if (liveMessages.value.length > 100) {
+    liveMessages.value = liveMessages.value.slice(-100)
+  }
+  nextTick(() => {
+    if (messageArea.value) {
+      messageArea.value.scrollTop = messageArea.value.scrollHeight
+    }
+  })
+}
+
 // 发送弹幕
 async function sendDanmaku() {
   const text = danmakuText.value.trim()
@@ -601,7 +669,12 @@ async function sendDanmaku() {
   try {
     const res = await fetch(`${API_BASE}/api/danmaku/send`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      // 必须带扫码令牌：服务端会校验它与 participantId 是否匹配，
+      // 否则任何人拿到别人的 participantId 就能冒充他发弹幕
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': participantToken.value || ''
+      },
       body: JSON.stringify({
         activityId: activityId.value,
         participantId: participant.value.id,
@@ -668,8 +741,10 @@ onUnmounted(() => {
 })
 </script>
 
-<style scoped>
-/* 设计系统 - 移动端优化 */
+<!-- 设计系统变量必须放在非 scoped 样式里。
+     写在 <style scoped> 中会被编译成 :root[data-v-xxx]，而 <html> 没有这个属性，
+     所有 var(--color-*) 都会失效：深色背景、白字、圆角全部回落成浏览器默认样式。 -->
+<style>
 :root {
   --color-primary: #f59e0b;
   --color-primary-dark: #d97706;
@@ -691,7 +766,10 @@ onUnmounted(() => {
   --shadow-md: 0 4px 16px rgba(0, 0, 0, 0.4);
   --shadow-lg: 0 8px 32px rgba(0, 0, 0, 0.5);
 }
+</style>
 
+<style scoped>
+/* 设计系统 - 移动端优化 */
 * {
   margin: 0;
   padding: 0;
@@ -1250,6 +1328,69 @@ onUnmounted(() => {
 }
 
 /* 限时抢奖区 */
+/* 中奖结果常驻卡片（轮次结束后依然显示，保证能记下领奖码） */
+.my-prize-card {
+  margin: 0 12px 8px;
+  padding: 16px 14px;
+  background: linear-gradient(135deg, rgba(245, 158, 11, 0.22), rgba(234, 88, 12, 0.16));
+  border: 1px solid rgba(251, 191, 36, 0.55);
+  border-radius: 14px;
+  text-align: center;
+  backdrop-filter: blur(10px);
+  animation: prizeIn 0.45s ease-out;
+}
+
+@keyframes prizeIn {
+  from { opacity: 0; transform: translateY(12px) scale(0.97); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+.my-prize-emoji {
+  font-size: 26px;
+  line-height: 1;
+  margin-bottom: 6px;
+}
+
+.my-prize-title {
+  font-size: 17px;
+  font-weight: 700;
+  color: #fbbf24;
+  letter-spacing: 1px;
+}
+
+.my-prize-sub {
+  margin-top: 4px;
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.78);
+}
+
+.my-prize-code {
+  margin: 10px 0 6px;
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: 4px;
+  color: #fff;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  text-shadow: 0 0 16px rgba(251, 191, 36, 0.7);
+}
+
+.my-prize-tip {
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.55);
+}
+
+/* 未抢到提示 */
+.my-lose-card {
+  margin: 0 12px 8px;
+  padding: 12px 14px;
+  background: rgba(148, 163, 184, 0.14);
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  border-radius: 12px;
+  text-align: center;
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.7);
+}
+
 .seckill-bar {
   margin: 0 12px 8px;
   padding: 12px 14px;

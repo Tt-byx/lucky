@@ -21,6 +21,7 @@ import com.lucky.websocket.LuckyWebSocketHandler;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.util.Collections;
@@ -54,8 +55,14 @@ public class LotteryServiceImpl extends ServiceImpl<LotteryRoundMapper, LotteryR
     private final LuckyWebSocketHandler webSocketHandler;
 
     @Override
+    @Transactional(rollbackFor = Exception.class)
     public LotteryRound createRound(LotteryDTO dto) {
-        Prize prize = prizeMapper.selectById(dto.getPrizeId());
+        // 用 FOR UPDATE 锁住奖品行，把「统计已分配名额 → 校验 → 落库」串行化。
+        // 原实现是先普通查询再 save：两个管理员同时建同一奖品的两个轮次时，
+        // 双方都读到相同的已分配名额，都通过校验，最后加起来超过库存。
+        Prize prize = prizeMapper.selectOne(new LambdaQueryWrapper<Prize>()
+                .eq(Prize::getId, dto.getPrizeId())
+                .last("FOR UPDATE"));
         if (prize == null || !dto.getActivityId().equals(prize.getActivityId())) {
             throw new BusinessException("奖品不存在或不属于当前活动");
         }
@@ -97,10 +104,10 @@ public class LotteryServiceImpl extends ServiceImpl<LotteryRoundMapper, LotteryR
             throw new BusinessException("该轮次已开始或已结束");
         }
 
-        // 先预热库存，预热失败就不允许开轮（宁可开不了，也不能开一个没库存的轮次）
-        seckillService.preheat(roundId);
-
-        // CAS 改状态：只有仍处于「待开始」才能改成「抢奖中」，天然防重复点击
+        // 先 CAS 改状态，只有抢到「待开始 → 抢奖中」那一次才继续。
+        // 原实现是先 preheat 再 CAS：两个管理员同时点「开始」时，
+        // 两个请求都会把 Redis 库存重置成满额；如果此时已经有用户抢走名额，
+        // 后来的那次重置会把已消耗的库存冲回去，等于凭空多发奖品。
         boolean updated = update(new LambdaUpdateWrapper<LotteryRound>()
                 .eq(LotteryRound::getId, roundId)
                 .eq(LotteryRound::getStatus, 0)
@@ -108,6 +115,19 @@ public class LotteryServiceImpl extends ServiceImpl<LotteryRoundMapper, LotteryR
                 .set(LotteryRound::getStartTime, LocalDateTime.now()));
         if (!updated) {
             throw new BusinessException("操作冲突，请刷新后重试");
+        }
+
+        // 抢占成功后才预热库存；预热失败要把状态退回去，
+        // 否则会留下一个「状态是抢奖中、但 Redis 里没有库存」的死轮次
+        try {
+            seckillService.preheat(roundId);
+        } catch (Exception e) {
+            update(new LambdaUpdateWrapper<LotteryRound>()
+                    .eq(LotteryRound::getId, roundId)
+                    .eq(LotteryRound::getStatus, 1)
+                    .set(LotteryRound::getStatus, 0));
+            log.error("轮次预热失败，已回退状态: roundId={}", roundId, e);
+            throw e;
         }
 
         Prize prize = prizeMapper.selectById(round.getPrizeId());
@@ -162,32 +182,45 @@ public class LotteryServiceImpl extends ServiceImpl<LotteryRoundMapper, LotteryR
         if (claimCode == null || claimCode.isBlank()) {
             throw new BusinessException("领奖码不能为空");
         }
+        String code = claimCode.trim().toUpperCase();
 
         Winner winner = winnerMapper.selectOne(new LambdaQueryWrapper<Winner>()
-                .eq(Winner::getClaimCode, claimCode.trim().toUpperCase())
+                .eq(Winner::getClaimCode, code)
                 .last("LIMIT 1"));
 
         if (winner == null) {
             throw new BusinessException("领奖码无效");
         }
-        if (winner.getStatus() != null && winner.getStatus() == 1) {
-            throw new BusinessException("该奖品已领取，请勿重复核销");
-        }
-        if (winner.getStatus() != null && winner.getStatus() == 2) {
-            throw new BusinessException("该中奖记录已放弃");
-        }
 
-        Winner update = new Winner();
-        update.setId(winner.getId());
-        update.setStatus(1);
-        update.setClaimedAt(LocalDateTime.now());
-        winnerMapper.updateById(update);
+        LocalDateTime now = LocalDateTime.now();
+
+        // 条件更新：只有仍处于「待领取(0)」才能核销。
+        // 原实现是「先查状态 → 判断 → 再更新」，两个人同时扫同一个码时，
+        // 双方都会读到 status=0 并都通过判断，结果两次都提示核销成功。
+        int affected = winnerMapper.update(null, new LambdaUpdateWrapper<Winner>()
+                .eq(Winner::getId, winner.getId())
+                .eq(Winner::getStatus, 0)
+                .set(Winner::getStatus, 1)
+                .set(Winner::getClaimedAt, now));
+
+        if (affected == 0) {
+            // 更新没命中，说明状态已经变了，回查一次给出准确提示
+            Winner latest = winnerMapper.selectById(winner.getId());
+            Integer st = latest == null ? null : latest.getStatus();
+            if (st != null && st == 1) {
+                throw new BusinessException("该奖品已领取，请勿重复核销");
+            }
+            if (st != null && st == 2) {
+                throw new BusinessException("该中奖记录已放弃");
+            }
+            throw new BusinessException("核销失败，请刷新后重试");
+        }
 
         winner.setStatus(1);
-        winner.setClaimedAt(update.getClaimedAt());
+        winner.setClaimedAt(now);
 
         log.info("领奖核销成功: winnerId={}, roundId={}, participantId={}, claimCode={}",
-                winner.getId(), winner.getRoundId(), winner.getParticipantId(), claimCode);
+                winner.getId(), winner.getRoundId(), winner.getParticipantId(), code);
         return winner;
     }
 

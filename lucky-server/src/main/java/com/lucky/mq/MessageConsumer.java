@@ -126,9 +126,8 @@ public class MessageConsumer {
             }
 
             // 3. 广播中奖结果到场次
-            long winnerCount = winnerMapper.selectCount(new LambdaQueryWrapper<Winner>()
-                    .eq(Winner::getRoundId, roundId));
-
+            // 这里刻意不再查 count(*)：大屏的「已抢到 N 人」用的是自己收到的 winnerList.length，
+            // 前端根本不用这个字段。而每条中奖消息都做一次全表 count，1000 人抢中就是 1000 次。
             Map<String, Object> payload = new HashMap<>();
             payload.put("roundId", roundId);
             payload.put("participantId", participantId);
@@ -140,7 +139,6 @@ public class MessageConsumer {
 
             payload.put("prizeId", prizeId);
             payload.put("claimCode", winner.getClaimCode());
-            payload.put("winnerCount", winnerCount);
             payload.put("remaining", seckillService.getRemaining(roundId));
 
             webSocketHandler.broadcastToActivity(activityId, "lottery_winner", payload);
@@ -179,14 +177,23 @@ public class MessageConsumer {
         try {
             Long activityId = asLong(danmakuData.get(FIELD_ACTIVITY_ID));
 
-            if (activityId != null) {
-                webSocketHandler.batchBroadcastDanmaku(activityId, "danmaku", danmakuData);
-            } else {
-                webSocketHandler.broadcast("danmaku", danmakuData);
-            }
-
             Object statusObj = danmakuData.get(FIELD_STATUS);
             int status = statusObj != null ? Integer.parseInt(statusObj.toString()) : 1;
+
+            // 只有审核通过的弹幕才推送。
+            // 被敏感词命中的消息也会进这个队列（status=2，用来留审计记录），
+            // 原来这里无条件广播，等于「用户收到『已被拒绝』的提示，但违规内容照样打在 2000 人的大屏上」，
+            // 敏感词过滤对整个现场是失效的。
+            if (status == 1) {
+                if (activityId != null) {
+                    webSocketHandler.batchBroadcastDanmaku(activityId, "danmaku", danmakuData);
+                } else {
+                    webSocketHandler.broadcast("danmaku", danmakuData);
+                }
+            } else {
+                log.info("弹幕未通过审核，仅入库不广播: activityId={}, status={}, content={}",
+                        activityId, status, danmakuData.get(FIELD_CONTENT));
+            }
 
             Danmaku danmaku = new Danmaku();
             danmaku.setActivityId(activityId);

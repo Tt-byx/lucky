@@ -45,8 +45,29 @@ public final class RedisKeys {
         return "lucky:participant:status:" + participantId;
     }
 
+    /**
+     * 参与者对象缓存（Jackson 序列化的 Participant）
+     *
+     * 弹幕链路每条消息都要拿发送者姓名，原先每次都 selectById。
+     * 姓名是几乎不变的静态数据，缓存住可以把这条高频路径的 DB 查询降到 0。
+     * 禁言/踢人时必须删除该 key，否则状态变更要等缓存过期才生效。
+     */
+    public static String participantObject(Long participantId) {
+        return "lucky:participant:obj:" + participantId;
+    }
+
     /** MQ 消费幂等标记 */
     public static String mqDedup(String messageId) {
         return "lucky:mq:dedup:" + messageId;
+    }
+
+    /**
+     * 抢奖点击频率限制（String 计数器，1 秒窗口，自动过期）
+     *
+     * 放在 Lua 脚本里做，零额外网络往返：
+     * 抢奖按钮被脚本连点时，靠它把请求挡在扣减之前，避免白白消耗 Redis 和 MQ。
+     */
+    public static String joinRate(Long participantId) {
+        return "lucky:join:rate:" + participantId;
     }
 }

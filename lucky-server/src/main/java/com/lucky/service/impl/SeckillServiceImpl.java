@@ -61,6 +61,12 @@ public class SeckillServiceImpl implements SeckillService {
     /** 参与者资格缓存有效期：5 分钟，管理员移除资格后最迟 5 分钟生效 */
     private static final long QUALIFICATION_CACHE_MINUTES = 5;
 
+    /**
+     * 同一用户每秒最多点击次数。
+     * 正常手点达不到这个值，只有脚本连点才会触发；阈值放在 Lua 里判断，零额外往返。
+     */
+    private static final int MAX_CLICKS_PER_SECOND = 5;
+
     private DefaultRedisScript<Long> seckillScript;
     private DefaultRedisScript<Long> rollbackScript;
 
@@ -167,6 +173,8 @@ public class SeckillServiceImpl implements SeckillService {
                 return fail(-1, "你本轮已抢到，请勿重复点击");
             case -2:
                 return fail(-2, "你已在本活动中过奖");
+            case -6:
+                return fail(-6, "点击太快了，请稍后再试");
             default:
                 return fail(-3, "本轮未开始");
         }
@@ -228,8 +236,10 @@ public class SeckillServiceImpl implements SeckillService {
                 seckillScript,
                 List.of(RedisKeys.roundStock(roundId),
                         RedisKeys.roundUsers(roundId),
-                        RedisKeys.activityWinners(activityId)),
-                participantId.toString());
+                        RedisKeys.activityWinners(activityId),
+                        RedisKeys.joinRate(participantId)),
+                participantId.toString(),
+                String.valueOf(MAX_CLICKS_PER_SECOND));
     }
 
     /**
@@ -357,6 +367,7 @@ public class SeckillServiceImpl implements SeckillService {
             case -2 -> "already_won";
             case -3 -> "not_started";
             case -4 -> "no_qualification";
+            case -6 -> "rate_limited";
             default -> "error";
         };
         meterRegistry.counter("lucky.seckill.join", "result", tag).increment();

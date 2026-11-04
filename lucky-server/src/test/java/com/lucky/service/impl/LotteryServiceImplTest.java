@@ -85,7 +85,7 @@ class LotteryServiceImplTest {
     @Test
     @DisplayName("奖品不存在时拒绝创建")
     void rejectWhenPrizeMissing() {
-        when(prizeMapper.selectById(PRIZE_ID)).thenReturn(null);
+        when(prizeMapper.selectOne(any())).thenReturn(null);
 
         assertThrows(BusinessException.class, () -> service.createRound(dto(1)));
         verify(service, never()).save(any(LotteryRound.class));
@@ -94,7 +94,7 @@ class LotteryServiceImplTest {
     @Test
     @DisplayName("奖品不属于当前活动时拒绝创建")
     void rejectWhenPrizeBelongsToOtherActivity() {
-        when(prizeMapper.selectById(PRIZE_ID)).thenReturn(prize(10, 999L));
+        when(prizeMapper.selectOne(any())).thenReturn(prize(10, 999L));
 
         assertThrows(BusinessException.class, () -> service.createRound(dto(1)));
     }
@@ -102,7 +102,7 @@ class LotteryServiceImplTest {
     @Test
     @DisplayName("名额超过奖品库存时拒绝创建")
     void rejectWhenQuotaExceedsStock() {
-        when(prizeMapper.selectById(PRIZE_ID)).thenReturn(prize(3, ACTIVITY_ID));
+        when(prizeMapper.selectOne(any())).thenReturn(prize(3, ACTIVITY_ID));
 
         BusinessException ex = assertThrows(BusinessException.class, () -> service.createRound(dto(5)));
         assertEquals("名额超出奖品库存，剩余可分配 3 个", ex.getMessage());
@@ -111,7 +111,7 @@ class LotteryServiceImplTest {
     @Test
     @DisplayName("同一奖品多轮次时按累计名额校验库存")
     void rejectWhenAccumulatedQuotaExceedsStock() {
-        when(prizeMapper.selectById(PRIZE_ID)).thenReturn(prize(5, ACTIVITY_ID));
+        when(prizeMapper.selectOne(any())).thenReturn(prize(5, ACTIVITY_ID));
 
         LotteryRound existing = new LotteryRound();
         existing.setId(1L);
@@ -127,7 +127,7 @@ class LotteryServiceImplTest {
     @Test
     @DisplayName("名额合法时创建成功且初始状态为待开始")
     void createRoundSuccessfully() {
-        when(prizeMapper.selectById(PRIZE_ID)).thenReturn(prize(10, ACTIVITY_ID));
+        when(prizeMapper.selectOne(any())).thenReturn(prize(10, ACTIVITY_ID));
 
         LotteryRound round = service.createRound(dto(3));
 

@@ -44,12 +44,12 @@ public class ScreenConfigController {
         
         if ("image".equals(type) && !FileUploadUtil.isImage(file)) {
             log.warn("不支持的图片格式: {}", file.getContentType());
-            return Result.error("不支持的图片格式，支持：jpg、png、gif、webp");
+            return Result.error("文件不是有效的图片：只支持 jpg/png/gif/webp，且不超过 10MB");
         }
         
         if ("video".equals(type) && !FileUploadUtil.isVideo(file)) {
             log.warn("不支持的视频格式: {}", file.getContentType());
-            return Result.error("不支持的视频格式，支持：mp4、webm、ogg");
+            return Result.error("文件不是有效的视频：只支持 mp4/webm/ogg，且不超过 100MB");
         }
         
         try {
@@ -89,11 +89,11 @@ public class ScreenConfigController {
         }
 
         if ("image".equals(type) && !FileUploadUtil.isImage(file)) {
-            return Result.error("不支持的图片格式，支持：jpg、png、gif、webp");
+            return Result.error("文件不是有效的图片：只支持 jpg/png/gif/webp，且不超过 10MB");
         }
 
         if ("video".equals(type) && !FileUploadUtil.isVideo(file)) {
-            return Result.error("不支持的视频格式，支持：mp4、webm、ogg");
+            return Result.error("文件不是有效的视频：只支持 mp4/webm/ogg，且不超过 100MB");
         }
 
         try {

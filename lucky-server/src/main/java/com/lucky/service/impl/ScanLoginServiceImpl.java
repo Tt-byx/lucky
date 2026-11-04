@@ -4,18 +4,25 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.lucky.annotation.RateLimit;
 import com.lucky.dto.ScanLoginDTO;
 import com.lucky.dto.ScanLoginVO;
+import com.lucky.entity.Activity;
 import com.lucky.entity.Participant;
 import com.lucky.exception.BusinessException;
+import com.lucky.mapper.ActivityMapper;
 import com.lucky.mapper.ParticipantMapper;
 import com.lucky.service.ScanLoginService;
 import com.lucky.util.RedisUtil;
+import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.core.io.ClassPathResource;
 import org.springframework.dao.DuplicateKeyException;
+import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.data.redis.core.script.DefaultRedisScript;
+import org.springframework.scripting.support.ResourceScriptSource;
 import org.springframework.stereotype.Service;
 
+import java.util.Collections;
 import java.util.UUID;
-import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -35,7 +42,20 @@ import java.util.concurrent.TimeUnit;
 public class ScanLoginServiceImpl implements ScanLoginService {
 
     private final ParticipantMapper participantMapper;
+    private final ActivityMapper activityMapper;
     private final RedisUtil redisUtil;
+    private final StringRedisTemplate stringRedisTemplate;
+
+    /** 单学号登录频次限制用的原子计数器脚本 */
+    private DefaultRedisScript<Long> rateCounterScript;
+
+    @PostConstruct
+    public void init() {
+        rateCounterScript = new DefaultRedisScript<>();
+        rateCounterScript.setScriptSource(
+                new ResourceScriptSource(new ClassPathResource("lua/rate_counter.lua")));
+        rateCounterScript.setResultType(Long.class);
+    }
 
     /** 临时令牌 Redis key 前缀 */
     private static final String TOKEN_KEY_PREFIX = "lucky:scan:token:";
@@ -43,8 +63,14 @@ public class ScanLoginServiceImpl implements ScanLoginService {
     /** 参与者信息缓存前缀 */
     private static final String PARTICIPANT_CACHE_KEY = "lucky:participant:info:";
 
-    /** 令牌有效期（2小时） */
-    private static final long TOKEN_EXPIRE_SECONDS = 7200;
+    /**
+     * 令牌有效期：8 小时。
+     *
+     * 原值是 2 小时，撑不住一场毕业典礼——典礼通常 2~3 小时，
+     * 到后半程全场令牌集体过期，用户 WebSocket 断开后连不回来、抢奖全部 401。
+     * 单独一个活动的时间窗不会超过 8 小时，足够覆盖。
+     */
+    private static final long TOKEN_EXPIRE_SECONDS = 28800;
 
     @Override
     @RateLimit(
@@ -62,32 +88,46 @@ public class ScanLoginServiceImpl implements ScanLoginService {
      * 这里放宽到 200 次/60 秒，真正的防刷交给「单学号」维度（见 login 内的频次校验）。
      */
     public ScanLoginVO login(ScanLoginDTO dto) {
-        // 1. 校验活动是否存在（可扩展：从缓存获取活动状态）
+        // 1. 校验活动真实存在且未结束
+        //    原先只判了 activityId 不为空，导致随便传一个不存在的 ID 也能注册成功，
+        //    数据库里会堆出挂在幽灵活动下的参与者；用户扫了过期二维码也会「登录成功」，
+        //    进直播间后才发现什么都没有。
         if (dto.getActivityId() == null) {
             throw new BusinessException("活动不存在，请先创建活动");
+        }
+        Activity activity = activityMapper.selectById(dto.getActivityId());
+        if (activity == null) {
+            throw new BusinessException("活动不存在，请扫描现场最新的二维码");
+        }
+        if (activity.getStatus() != null && activity.getStatus() == 2) {
+            throw new BusinessException("本次活动已结束，无法进入");
         }
 
         // 2. 单学号频次限制：IP 维度已经放宽（校园网 NAT），防刷靠这一层
         checkStudentRate(dto);
 
-        // 2. 查找或创建参与者（优先缓存，避免高频 DB 查询）
+        // 3. 查找或创建参与者（优先缓存，避免高频 DB 查询）
         Participant participant = findOrCreateParticipant(dto);
+        if (participant == null) {
+            // 并发插入冲突后回查也可能落空，这里必须兜住，否则下一行就是 NPE
+            throw new BusinessException("注册失败，请重试");
+        }
 
-        // 3. 检查是否被移出直播间
+        // 4. 检查是否被移出直播间
         if (participant.getIsBanned() != null && participant.getIsBanned() == 1) {
             throw new BusinessException("您已被移出直播间，无法登录");
         }
 
-        // 4. 生成场次专属临时令牌（绑定活动ID+用户ID+有效期）
+        // 5. 生成场次专属临时令牌（绑定活动ID+用户ID+有效期）
         String token = generateToken(participant, dto.getActivityId());
 
-        // 5. 异步记录登录日志（不阻塞主链路）
+        // 6. 异步记录登录日志（不阻塞主链路）
         asyncRecordLogin(participant);
 
         log.info("扫码登录成功: activityId={}, participantId={}, studentId={}, name={}",
                 dto.getActivityId(), participant.getId(), dto.getStudentId(), dto.getName());
 
-        // 6. 同步返回登录结果（主链路无 DB 写入，响应 ≤ 50ms）
+        // 7. 同步返回登录结果（主链路无 DB 写入，响应 ≤ 50ms）
         return ScanLoginVO.builder()
                 .token(token)
                 .participantId(participant.getId())
@@ -101,13 +141,15 @@ public class ScanLoginServiceImpl implements ScanLoginService {
     /**
      * 单学号登录频次限制：60 秒内最多 5 次
      * 同一学号被反复刷说明是脚本，和 IP 无关
+     *
+     * 自增和设置过期必须在同一个 Lua 里完成：
+     * 原来分两步调用，如果 INCR 之后连接断开导致 EXPIRE 没执行，
+     * 这个 key 就永久存在，对应学号会被永远限流。
      */
     private void checkStudentRate(ScanLoginDTO dto) {
         String key = "lucky:scan:student:" + dto.getActivityId() + ":" + dto.getStudentId();
-        Long count = redisUtil.increment(key);
-        if (count != null && count == 1L) {
-            redisUtil.expire(key, 60, TimeUnit.SECONDS);
-        }
+        Long count = stringRedisTemplate.execute(
+                rateCounterScript, Collections.singletonList(key), "60");
         if (count != null && count > 5L) {
             throw new BusinessException("该学号登录过于频繁，请稍后再试");
         }
@@ -221,17 +263,15 @@ public class ScanLoginServiceImpl implements ScanLoginService {
     }
 
     /**
-     * 异步记录登录信息（不阻塞主链路）
-     * 可扩展：登录记录、IP 记录、设备信息等
+     * 记录登录信息
+     *
+     * 原实现用 CompletableFuture.runAsync 起一个异步任务，但方法体里只有一行 debug 日志，
+     * 等于每次登录都往 ForkJoinPool.commonPool 塞一个空任务——2000 人扫码就是 2000 个，
+     * 而 commonPool 的并行度只有 CPU-1，会挤占其他并行流。
+     * 既然没有真实业务，就退化成同步的一行日志；将来真要写登录记录表，
+     * 应该走消息队列而不是裸的 commonPool（无事务、无监控、异常还被吞掉）。
      */
     private void asyncRecordLogin(Participant participant) {
-        CompletableFuture.runAsync(() -> {
-            try {
-                log.debug("异步记录登录: participantId={}, name={}", participant.getId(), participant.getName());
-                // 可扩展：写入登录记录表、更新最后登录时间等
-            } catch (Exception e) {
-                log.error("异步记录登录失败: participantId={}", participant.getId(), e);
-            }
-        });
+        log.debug("登录记录: participantId={}, name={}", participant.getId(), participant.getName());
     }
 }

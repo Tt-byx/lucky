@@ -160,8 +160,13 @@ import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
 import QRCode from 'qrcode'
 
 // 配置
-const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:8080'
-const WS_URL = import.meta.env.VITE_WS_URL || 'ws://localhost:8080/ws/lucky'
+// 空字符串表示「同源」，由 nginx 把 /api/ 与 /ws/ 代理到后端；
+// 开发环境 .env.development 会覆盖成 http://localhost:8080。
+// 不能用 `||`：空字符串是 falsy，会静默回落到 localhost，生产环境就打到用户自己电脑了。
+const API_BASE = import.meta.env.VITE_API_BASE ?? ''
+// WebSocket 地址按当前页面的协议和主机推导，避免写死 IP（换环境就要重新打包）
+const WS_URL = import.meta.env.VITE_WS_URL
+  || `${location.protocol === 'https:' ? 'wss:' : 'ws:'}//${location.host}/ws/lucky`
 const MOBILE_URL = import.meta.env.VITE_MOBILE_URL || `${window.location.protocol}//${window.location.hostname}:5174`
 
 // 状态
@@ -251,15 +256,30 @@ async function generateQRCode() {
 
 // WebSocket 连接
 let ws = null
+let heartbeatTimer = null
+let wsClosedByUs = false
+
 function connectWebSocket() {
   try {
+    // 重连时复位「主动关闭」标志
+    wsClosedByUs = false
     ws = new WebSocket(WS_URL)
 
     ws.onopen = () => {
       console.log('WebSocket 已连接')
+      // 每 25 秒发一次心跳。服务端 90 秒收不到心跳会判定为僵尸连接并断开；
+      // 原先三端前端都不发 ping，大屏更是连心跳记录都没有，导致连接被周期性掐断。
+      if (heartbeatTimer) clearInterval(heartbeatTimer)
+      heartbeatTimer = setInterval(() => {
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          ws.send('ping')
+        }
+      }, 25000)
     }
 
     ws.onmessage = (event) => {
+      // 心跳响应是纯文本 "pong"，不是 JSON。不先拦掉的话每条心跳都会抛一次解析异常。
+      if (event.data === 'pong') return
       try {
         const msg = JSON.parse(event.data)
         switch (msg.type) {
@@ -271,6 +291,18 @@ function connectWebSocket() {
             break
           case 'danmaku':
             addDanmaku(msg.data)
+            break
+          case 'danmaku_batch':
+            // 服务端为削峰会把多条弹幕合并成一批（data 是 JSON 字符串数组），
+            // 原先没有这个分支，导致弹幕消息被整批丢弃、大屏一条都不显示
+            (msg.data || []).forEach(raw => {
+              try {
+                const inner = typeof raw === 'string' ? JSON.parse(raw) : raw
+                if (inner && inner.data) addDanmaku(inner.data)
+              } catch (e) {
+                console.error('弹幕批量解析失败:', e, raw)
+              }
+            })
             break
           case 'lottery_start':
             startSeckill(msg.data)
@@ -292,6 +324,12 @@ function connectWebSocket() {
     }
 
     ws.onclose = () => {
+      if (heartbeatTimer) {
+        clearInterval(heartbeatTimer)
+        heartbeatTimer = null
+      }
+      // 页面卸载时主动关闭，不应再重连，否则定时器会一直挂着
+      if (wsClosedByUs) return
       console.log('WebSocket 已断开，3秒后重连...')
       setTimeout(connectWebSocket, 3000)
     }
@@ -325,6 +363,11 @@ function addDanmaku(data) {
   const colors = ['#ff6b6b', '#feca57', '#48dbfb', '#ff9ff3', '#54a0ff', '#5f27cd', '#01a3a4', '#00d2d3', '#ff9f43', '#10ac84']
   const color = colors[Math.floor(Math.random() * colors.length)]
   const fontSizeVar = settings.fontSize + (Math.random() - 0.5) * 8
+
+  // speed 在后台是「弹幕飞过屏幕的秒数」（滑块 4~16s）。
+  // 这里原先直接引用了未声明的 duration，导致每收到一条弹幕就抛 ReferenceError，
+  // 大屏一条弹幕都渲染不出来。加 ±1s 随机浮动，避免整屏弹幕完全同步移动。
+  const duration = (settings.speed || 10) + (Math.random() - 0.5) * 2
 
   const danmaku = {
     id,
@@ -479,14 +522,23 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
+  // 先标记主动关闭，否则 onclose 里会再排一个重连定时器
+  wsClosedByUs = true
+  if (heartbeatTimer) {
+    clearInterval(heartbeatTimer)
+    heartbeatTimer = null
+  }
   if (ws) ws.close()
   stopCountdown()
   if (bgPollTimer) clearInterval(bgPollTimer)
 })
 </script>
 
-<style scoped>
-/* 设计系统 - 使用CSS变量 */
+<!-- 设计系统变量必须放在非 scoped 样式里。
+     写在 <style scoped> 中会被编译成 :root[data-v-xxx]，
+     而 <html> 元素没有这个属性，导致所有 var(--color-*) 全部失效：
+     文字回落成黑色、深色渐变背景丢失。管理后台当初就踩过这个坑。 -->
+<style>
 :root {
   --color-primary: #feca57;
   --color-secondary: #ff6b6b;
@@ -500,7 +552,9 @@ onUnmounted(() => {
   --glass-border: rgba(255, 255, 255, 0.1);
   --glass-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
 }
+</style>
 
+<style scoped>
 /* 基础屏幕样式 */
 .screen {
   width: 100vw;
@@ -684,6 +738,159 @@ onUnmounted(() => {
 }
 
 /* 等待状态 */
+/* ==================== 抢奖进行中 ====================
+   这套类名在模板里早就用了，但样式表里一条都没有。
+   结果是大屏在抢奖过程中变成裸文档流：内容全挤到左上角、文字逐字换行、
+   中奖名单和二维码互相压住。只有真正跑一遍浏览器才会发现。 */
+.lottery-active {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 48px 56px;
+  gap: 26px;
+}
+
+.active-header {
+  text-align: center;
+}
+
+.active-round {
+  font-size: 46px;
+  font-weight: 800;
+  color: var(--color-primary);
+  letter-spacing: 2px;
+  text-shadow: 0 4px 24px rgba(254, 202, 87, 0.45);
+}
+
+.active-prize {
+  margin-top: 8px;
+  font-size: 20px;
+  color: var(--color-text-muted);
+}
+
+/* 三个统计卡片 */
+.active-stats {
+  display: flex;
+  gap: 18px;
+}
+
+.active-stat {
+  min-width: 140px;
+  padding: 16px 22px;
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  border-radius: 16px;
+  text-align: center;
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+}
+
+.active-stat.highlight {
+  background: rgba(254, 202, 87, 0.12);
+  border-color: rgba(254, 202, 87, 0.45);
+}
+
+.active-stat-value {
+  font-size: 40px;
+  font-weight: 800;
+  line-height: 1.1;
+  color: var(--color-text-primary);
+  font-variant-numeric: tabular-nums;
+}
+
+.active-stat.highlight .active-stat-value {
+  color: var(--color-primary);
+}
+
+.active-stat-label {
+  margin-top: 6px;
+  font-size: 13px;
+  color: var(--color-text-muted);
+  letter-spacing: 1px;
+}
+
+/* 中奖者实时列表：名额多的时候要能滚，不能把布局顶破 */
+.active-winners {
+  width: 100%;
+  max-width: 720px;
+  max-height: 320px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 4px;
+}
+
+.active-winners::-webkit-scrollbar {
+  width: 6px;
+}
+
+.active-winners::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.18);
+  border-radius: 3px;
+}
+
+.active-empty {
+  padding: 26px 0;
+  text-align: center;
+  font-size: 17px;
+  color: var(--color-text-muted);
+}
+
+.active-winner-row {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  padding: 12px 18px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--glass-border);
+  border-left: 3px solid var(--color-primary);
+  border-radius: 10px;
+  animation: winnerSlideIn 0.4s ease-out;
+}
+
+@keyframes winnerSlideIn {
+  from { opacity: 0; transform: translateX(-24px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+.row-index {
+  width: 30px;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--color-primary);
+  text-align: center;
+}
+
+.row-name {
+  flex: 1;
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+.row-student {
+  font-size: 14px;
+  color: var(--color-text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.row-code {
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: 2px;
+  color: var(--color-accent);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.active-hint {
+  font-size: 15px;
+  color: var(--color-text-muted);
+}
+
 .lottery-idle {
   position: absolute;
   inset: 0;

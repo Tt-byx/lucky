@@ -1,5 +1,30 @@
 <template>
-  <div class="admin-app">
+  <!-- 登录页：所有管理接口都要 JWT，没有 token 就不进主界面 -->
+  <div v-if="!isAuthed" class="login-page">
+    <div class="login-card">
+      <div class="login-brand">
+        <div class="login-logo">🎁</div>
+        <h1>抽奖管理后台</h1>
+        <p>毕业典礼实时互动抽奖系统</p>
+      </div>
+      <form class="login-form" @submit.prevent="doLogin">
+        <label>
+          <span>用户名</span>
+          <input v-model="loginForm.username" type="text" placeholder="请输入管理员账号" autocomplete="username" />
+        </label>
+        <label>
+          <span>密码</span>
+          <input v-model="loginForm.password" type="password" placeholder="请输入密码" autocomplete="current-password" />
+        </label>
+        <p v-if="loginError" class="login-error">{{ loginError }}</p>
+        <button type="submit" :disabled="loggingIn">
+          {{ loggingIn ? '登录中...' : '登 录' }}
+        </button>
+      </form>
+    </div>
+  </div>
+
+  <div v-else class="admin-app">
     <!-- 侧边栏 -->
     <div class="sidebar">
       <div class="sidebar-header">
@@ -12,6 +37,9 @@
         <a :class="{ active: currentTab === 'screen' }" @click="currentTab = 'screen'">屏幕设置</a>
         <a :class="{ active: currentTab === 'users' }" @click="currentTab = 'users'">用户管理</a>
       </nav>
+      <div class="sidebar-footer">
+        <button class="btn-logout" @click="doLogout">退出登录</button>
+      </div>
     </div>
 
     <!-- 主内容区 -->
@@ -469,8 +497,89 @@
 
 <script setup>
 import { ref, computed, onMounted, watch } from 'vue'
+// 原来靠 index.html 里的 jsdelivr CDN 加载 cropperjs，
+// 一旦访问不了外网，CSS 会阻塞 DOMContentLoaded，整个后台白屏。
+// 改成随包构建，离线/内网部署也能正常打开。
+import Cropper from 'cropperjs'
+import 'cropperjs/dist/cropper.css'
 
-const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:8080'
+// 空字符串表示「同源」，由 nginx 把 /api/ 代理到后端；
+// 开发环境 .env.development 会覆盖成 http://localhost:8080。
+// 注意不能用 `||`：空字符串会被当成 falsy 而回落到 localhost，生产环境就打到用户自己电脑了。
+const API_BASE = import.meta.env.VITE_API_BASE ?? ''
+
+// ============ 登录态 ============
+// 管理后台所有写操作都要 JWT，之前这里完全没有登录逻辑，
+// 导致浏览器里每个请求都是 403，后台等于不可用。
+const TOKEN_KEY = 'lucky_admin_token'
+const isAuthed = ref(!!localStorage.getItem(TOKEN_KEY))
+const loginForm = ref({ username: '', password: '' })
+const loggingIn = ref(false)
+const loginError = ref('')
+
+/** 统一请求封装：自动带 JWT，401/403 视为登录失效并退回登录页 */
+async function apiFetch(url, options = {}) {
+  const token = localStorage.getItem(TOKEN_KEY)
+  const headers = { ...(options.headers || {}) }
+  if (token) headers['Authorization'] = `Bearer ${token}`
+
+  // 这里必须是原生 fetch：apiFetch 是对它的封装，写成 apiFetch 会无限递归
+  const res = await fetch(url, { ...options, headers })
+
+  if (res.status === 401 || res.status === 403) {
+    // token 过期或被拒：清掉本地凭证，让用户重新登录
+    localStorage.removeItem(TOKEN_KEY)
+    isAuthed.value = false
+    loginError.value = '登录已失效，请重新登录'
+    // 抛错让调用方的 catch 走统一提示，避免把 403 的空 body 当 JSON 解析
+    throw new Error('UNAUTHORIZED')
+  }
+  return res
+}
+
+async function doLogin() {
+  if (!loginForm.value.username.trim() || !loginForm.value.password) {
+    loginError.value = '请输入用户名和密码'
+    return
+  }
+  loggingIn.value = true
+  loginError.value = ''
+  try {
+    // 登录接口本身不带 token，直接用原生 fetch
+    const res = await fetch(`${API_BASE}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        username: loginForm.value.username.trim(),
+        password: loginForm.value.password
+      })
+    })
+    const data = await res.json()
+    if (data.code === 200 && data.data?.token) {
+      localStorage.setItem(TOKEN_KEY, data.data.token)
+      isAuthed.value = true
+      loginForm.value.password = ''
+      await loadInitialData()
+    } else {
+      loginError.value = data.message || '用户名或密码错误'
+    }
+  } catch (e) {
+    loginError.value = '登录失败：' + e.message
+  } finally {
+    loggingIn.value = false
+  }
+}
+
+function doLogout() {
+  // 通知后端把 JWT 加入黑名单，失败也不阻塞本地登出
+  apiFetch(`${API_BASE}/api/auth/logout`, { method: 'POST' }).catch(() => {})
+  localStorage.removeItem(TOKEN_KEY)
+  isAuthed.value = false
+  currentActivity.value = null
+  prizes.value = []
+  rounds.value = []
+  participantCount.value = 0
+}
 
 // 当前 tab
 const currentTab = ref(localStorage.getItem('admin_currentTab') || 'activity')
@@ -553,7 +662,7 @@ const userSearch = ref('')
 // 获取当前活动
 async function fetchCurrentActivity() {
   try {
-    const res = await fetch(`${API_BASE}/api/activity/current`)
+    const res = await apiFetch(`${API_BASE}/api/activity/current`)
     const data = await res.json()
     if (data.code === 200 && data.data) {
       currentActivity.value = data.data
@@ -572,8 +681,12 @@ async function createActivity() {
     return
   }
   try {
-    const res = await fetch(`${API_BASE}/api/activity?name=${encodeURIComponent(newActivityName.value)}`, {
-      method: 'POST'
+    // 后端签名是 @Valid @RequestBody CreateActivityDTO，
+    // 必须发 JSON body；之前发 query 参数会因 body 缺失直接抛异常返回 500
+    const res = await apiFetch(`${API_BASE}/api/activity`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: newActivityName.value.trim() })
     })
     const data = await res.json()
     if (data.code === 200) {
@@ -595,7 +708,7 @@ async function createActivity() {
 async function updateActivityStatus(status) {
   if (!currentActivity.value) return
   try {
-    const res = await fetch(`${API_BASE}/api/activity/${currentActivity.value.id}/status?status=${status}`, {
+    const res = await apiFetch(`${API_BASE}/api/activity/${currentActivity.value.id}/status?status=${status}`, {
       method: 'PUT'
     })
     const data = await res.json()
@@ -614,7 +727,7 @@ async function updateActivityStatus(status) {
 async function fetchParticipantCount() {
   if (!currentActivity.value) return
   try {
-    const res = await fetch(`${API_BASE}/api/participant/count?activityId=${currentActivity.value.id}`)
+    const res = await apiFetch(`${API_BASE}/api/participant/count?activityId=${currentActivity.value.id}`)
     const data = await res.json()
     if (data.code === 200) {
       participantCount.value = data.data
@@ -635,7 +748,7 @@ async function createRound() {
     return
   }
   try {
-    const res = await fetch(`${API_BASE}/api/lottery/round`, {
+    const res = await apiFetch(`${API_BASE}/api/lottery/round`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -673,7 +786,7 @@ async function createPrize() {
   }
 
   try {
-    const res = await fetch(`${API_BASE}/api/prize`, {
+    const res = await apiFetch(`${API_BASE}/api/prize`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -700,7 +813,7 @@ async function createPrize() {
 async function fetchPrizes() {
   if (!currentActivity.value) return
   try {
-    const res = await fetch(`${API_BASE}/api/prize/list?activityId=${currentActivity.value.id}`)
+    const res = await apiFetch(`${API_BASE}/api/prize/list?activityId=${currentActivity.value.id}`)
     const data = await res.json()
     if (data.code === 200) {
       prizes.value = data.data || []
@@ -725,7 +838,7 @@ async function startRound(round) {
   if (!confirm(`确定要开始"${round.roundName}"的抢奖吗？开始后用户可立即点击抢奖。`)) return
 
   try {
-    const res = await fetch(`${API_BASE}/api/lottery/round/${round.id}/start`, {
+    const res = await apiFetch(`${API_BASE}/api/lottery/round/${round.id}/start`, {
       method: 'POST'
     })
     const data = await res.json()
@@ -746,7 +859,7 @@ async function endRound(round) {
   if (!confirm(`确定要结束"${round.roundName}"吗？结束后用户将无法继续抢奖。`)) return
 
   try {
-    const res = await fetch(`${API_BASE}/api/lottery/round/${round.id}/end`, {
+    const res = await apiFetch(`${API_BASE}/api/lottery/round/${round.id}/end`, {
       method: 'POST'
     })
     const data = await res.json()
@@ -764,7 +877,7 @@ async function endRound(round) {
 // 查询剩余名额
 async function fetchRemaining(roundId) {
   try {
-    const res = await fetch(`${API_BASE}/api/lottery/remaining?roundId=${roundId}`)
+    const res = await apiFetch(`${API_BASE}/api/lottery/remaining?roundId=${roundId}`)
     const data = await res.json()
     if (data.code === 200) {
       remainingMap.value = { ...remainingMap.value, [roundId]: data.data }
@@ -776,11 +889,21 @@ async function fetchRemaining(roundId) {
 
 // 轮询进行中轮次的剩余名额
 let remainingTimer = null
+let pollTick = 0
 function startRemainingPolling() {
   if (remainingTimer) return
   remainingTimer = setInterval(() => {
+    pollTick++
     const active = rounds.value.filter(r => r.status === 1)
     active.forEach(r => fetchRemaining(r.id))
+
+    // 轮次可能在服务端自动结束（名额抢完），而本地的 rounds 数组还停在 status=1。
+    // 只靠本地状态比对永远发现不了这种情况，所以固定每 3 个 tick（6 秒）
+    // 回源一次轮次与奖品，否则「剩余 x / y」会一直显示旧值。
+    if (pollTick % 3 === 0) {
+      fetchRounds()
+      fetchPrizes()
+    }
   }, 2000)
 }
 
@@ -788,7 +911,7 @@ function startRemainingPolling() {
 async function fetchRounds() {
   if (!currentActivity.value) return
   try {
-    const res = await fetch(`${API_BASE}/api/lottery/rounds?activityId=${currentActivity.value.id}`)
+    const res = await apiFetch(`${API_BASE}/api/lottery/rounds?activityId=${currentActivity.value.id}`)
     const data = await res.json()
     if (data.code === 200) {
       rounds.value = data.data
@@ -803,7 +926,7 @@ async function fetchRounds() {
 // 获取敏感词列表
 async function fetchSensitiveWords() {
   try {
-    const res = await fetch(`${API_BASE}/api/sensitive-word/list`)
+    const res = await apiFetch(`${API_BASE}/api/sensitive-word/list`)
     const data = await res.json()
     if (data.code === 200) {
       sensitiveWords.value = data.data
@@ -820,7 +943,7 @@ async function addSensitiveWord() {
     return
   }
   try {
-    const res = await fetch(`${API_BASE}/api/sensitive-word?word=${encodeURIComponent(newSensitiveWord.value)}`, {
+    const res = await apiFetch(`${API_BASE}/api/sensitive-word?word=${encodeURIComponent(newSensitiveWord.value)}`, {
       method: 'POST'
     })
     const data = await res.json()
@@ -839,7 +962,7 @@ async function addSensitiveWord() {
 // 删除敏感词
 async function deleteSensitiveWord(id) {
   try {
-    const res = await fetch(`${API_BASE}/api/sensitive-word/${id}`, {
+    const res = await apiFetch(`${API_BASE}/api/sensitive-word/${id}`, {
       method: 'DELETE'
     })
     const data = await res.json()
@@ -857,12 +980,12 @@ async function deleteSensitiveWord(id) {
 // 获取历史活动列表
 async function fetchHistoryActivities() {
   try {
-    const res = await fetch(`${API_BASE}/api/activity/history`)
+    const res = await apiFetch(`${API_BASE}/api/activity/history`)
     const data = await res.json()
     if (data.code === 200) {
       historyActivities.value = data.data
       for (const act of data.data) {
-        const countRes = await fetch(`${API_BASE}/api/participant/count?activityId=${act.id}`)
+        const countRes = await apiFetch(`${API_BASE}/api/participant/count?activityId=${act.id}`)
         const countData = await countRes.json()
         if (countData.code === 200) {
           act.participantCount = countData.data
@@ -878,7 +1001,7 @@ async function fetchHistoryActivities() {
 async function deleteActivity(activity) {
   if (!confirm(`确定要删除活动"${activity.name}"吗？删除后将无法恢复。`)) return
   try {
-    const res = await fetch(`${API_BASE}/api/activity/${activity.id}`, {
+    const res = await apiFetch(`${API_BASE}/api/activity/${activity.id}`, {
       method: 'DELETE'
     })
     const data = await res.json()
@@ -901,18 +1024,18 @@ async function showHistoryDetail(activity) {
   detailRounds.value = []
   detailWinners.value = {}
   try {
-    const res = await fetch(`${API_BASE}/api/lottery/rounds?activityId=${activity.id}`)
+    const res = await apiFetch(`${API_BASE}/api/lottery/rounds?activityId=${activity.id}`)
     const data = await res.json()
     if (data.code === 200) {
       detailRounds.value = data.data
       for (const round of data.data) {
-        const winRes = await fetch(`${API_BASE}/api/lottery/winners?roundId=${round.id}`)
+        const winRes = await apiFetch(`${API_BASE}/api/lottery/winners?roundId=${round.id}`)
         const winData = await winRes.json()
         if (winData.code === 200) {
           const winners = winData.data
           for (const winner of winners) {
             if (winner.participantId && !winner.name) {
-              const participantRes = await fetch(`${API_BASE}/api/participant/list?activityId=${activity.id}`)
+              const participantRes = await apiFetch(`${API_BASE}/api/participant/list?activityId=${activity.id}`)
               const participantData = await participantRes.json()
               if (participantData.code === 200) {
                 const participant = participantData.data.find(p => p.id === winner.participantId)
@@ -938,16 +1061,22 @@ async function showParticipants(activity) {
   showParticipantModal.value = true
   participants.value = []
   try {
-    const res = await fetch(`${API_BASE}/api/participant/list?activityId=${activity.id}`)
+    const res = await apiFetch(`${API_BASE}/api/participant/list?activityId=${activity.id}`)
     const data = await res.json()
     if (data.code === 200) {
       participants.value = data.data
-      for (const p of participants.value) {
-        const danmakuRes = await fetch(`${API_BASE}/api/danmaku/approved?activityId=${activity.id}`)
-        const danmakuData = await danmakuRes.json()
-        if (danmakuData.code === 200) {
-          p.danmakuCount = danmakuData.data.filter(d => d.participantId === p.id).length
+      // 一次拿到所有人的弹幕数。
+      // 原来是对每个参与者都拉一次全量弹幕再在内存里 filter，2000 人就是 2000 次请求，
+      // 每次还返回几千条数据，浏览器会直接卡死。
+      try {
+        const cntRes = await apiFetch(`${API_BASE}/api/danmaku/count-by-user?activityId=${activity.id}`)
+        const cntData = await cntRes.json()
+        const cntMap = (cntData.code === 200 && cntData.data) || {}
+        for (const p of participants.value) {
+          p.danmakuCount = cntMap[String(p.id)] || 0
         }
+      } catch (e) {
+        console.error('统计弹幕数失败:', e)
       }
     }
   } catch (e) {
@@ -961,10 +1090,12 @@ async function showDanmakuDetail(participant) {
   showDanmakuModal.value = true
   participantDanmakus.value = []
   try {
-    const res = await fetch(`${API_BASE}/api/danmaku/approved?activityId=${participantActivity.value.id}`)
+    // 直接按 participantId 查，后端只返回该用户的最近 200 条。
+    // 原来是拉整场弹幕再 filter，用户发言多的时候一次要传几 MB。
+    const res = await apiFetch(`${API_BASE}/api/danmaku/approved?activityId=${participantActivity.value.id}&participantId=${participant.id}`)
     const data = await res.json()
     if (data.code === 200) {
-      participantDanmakus.value = data.data.filter(d => d.participantId === participant.id)
+      participantDanmakus.value = data.data
     }
   } catch (e) {
     console.error('加载弹幕详情失败:', e)
@@ -987,7 +1118,7 @@ function formatTime(time) {
 // 获取屏幕配置
 async function fetchScreenConfig() {
   try {
-    const res = await fetch(`${API_BASE}/api/screen/config`)
+    const res = await apiFetch(`${API_BASE}/api/screen/config`)
     const data = await res.json()
     if (data.code === 200 && data.data) {
       screenConfig.value = {
@@ -1016,7 +1147,7 @@ async function uploadBackground() {
     const formData = new FormData()
     formData.append('type', bgType.value)
     formData.append('file', selectedFile.value)
-    const res = await fetch(`${API_BASE}/api/screen/background`, {
+    const res = await apiFetch(`${API_BASE}/api/screen/background`, {
       method: 'POST',
       body: formData
     })
@@ -1044,7 +1175,7 @@ async function uploadBackground() {
 async function clearBackground() {
   if (!confirm('确定要清除自定义背景，恢复默认吗？')) return
   try {
-    const res = await fetch(`${API_BASE}/api/screen/background`, {
+    const res = await apiFetch(`${API_BASE}/api/screen/background`, {
       method: 'DELETE'
     })
     const data = await res.json()
@@ -1143,7 +1274,7 @@ async function uploadMobileBackground() {
     const formData = new FormData()
     formData.append('type', mobileBgType.value)
     formData.append('file', mobileSelectedFile.value)
-    const res = await fetch(`${API_BASE}/api/screen/mobile-background`, {
+    const res = await apiFetch(`${API_BASE}/api/screen/mobile-background`, {
       method: 'POST',
       body: formData
     })
@@ -1171,7 +1302,7 @@ async function uploadMobileBackground() {
 async function clearMobileBackground() {
   if (!confirm('确定要清除手机端自定义背景吗？')) return
   try {
-    const res = await fetch(`${API_BASE}/api/screen/mobile-background`, {
+    const res = await apiFetch(`${API_BASE}/api/screen/mobile-background`, {
       method: 'DELETE'
     })
     const data = await res.json()
@@ -1193,7 +1324,7 @@ async function clearMobileBackground() {
 // 保存弹幕设置
 async function saveDanmakuSettings() {
   try {
-    const res = await fetch(`${API_BASE}/api/screen/danmaku-settings`, {
+    const res = await apiFetch(`${API_BASE}/api/screen/danmaku-settings`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json'
@@ -1215,7 +1346,7 @@ async function saveDanmakuSettings() {
 // 获取弹幕设置
 async function fetchDanmakuSettings() {
   try {
-    const res = await fetch(`${API_BASE}/api/screen/danmaku-settings`)
+    const res = await apiFetch(`${API_BASE}/api/screen/danmaku-settings`)
     const data = await res.json()
     if (data.code === 200 && data.data) {
       danmakuSettings.value = data.data
@@ -1247,7 +1378,7 @@ const filteredUsers = computed(() => {
 async function fetchAllUsers() {
   if (!currentActivity.value) return
   try {
-    const res = await fetch(`${API_BASE}/api/admin/user/list?activityId=${currentActivity.value.id}`)
+    const res = await apiFetch(`${API_BASE}/api/admin/user/list?activityId=${currentActivity.value.id}`)
     const data = await res.json()
     if (data.code === 200) {
       allUsers.value = data.data
@@ -1260,7 +1391,7 @@ async function fetchAllUsers() {
 async function fetchOnlineUsers() {
   if (!currentActivity.value) return
   try {
-    const res = await fetch(`${API_BASE}/api/admin/user/online?activityId=${currentActivity.value.id}`)
+    const res = await apiFetch(`${API_BASE}/api/admin/user/online?activityId=${currentActivity.value.id}`)
     const data = await res.json()
     if (data.code === 200) {
       onlineUsers.value = data.data
@@ -1274,7 +1405,7 @@ async function fetchOnlineUsers() {
 async function toggleMute(user) {
   const muted = !user.isMuted
   try {
-    const res = await fetch(`${API_BASE}/api/admin/user/${user.id}/mute?muted=${muted}`, { method: 'PUT' })
+    const res = await apiFetch(`${API_BASE}/api/admin/user/${user.id}/mute?muted=${muted}`, { method: 'PUT' })
     const data = await res.json()
     if (data.code === 200) {
       user.isMuted = muted ? 1 : 0
@@ -1290,7 +1421,7 @@ async function toggleBan(user) {
   const banned = !user.isBanned
   if (banned && !confirm(`确定要将 ${user.name} 移出直播间吗？`)) return
   try {
-    const res = await fetch(`${API_BASE}/api/admin/user/${user.id}/ban?banned=${banned}`, { method: 'PUT' })
+    const res = await apiFetch(`${API_BASE}/api/admin/user/${user.id}/ban?banned=${banned}`, { method: 'PUT' })
     const data = await res.json()
     if (data.code === 200) {
       user.isBanned = banned ? 1 : 0
@@ -1307,7 +1438,7 @@ async function toggleLottery(user) {
   const removed = user.status !== 3
   if (removed && !confirm(`确定要移除 ${user.name} 的抽奖资格吗？`)) return
   try {
-    const res = await fetch(`${API_BASE}/api/admin/user/${user.id}/lottery?removed=${removed}`, { method: 'PUT' })
+    const res = await apiFetch(`${API_BASE}/api/admin/user/${user.id}/lottery?removed=${removed}`, { method: 'PUT' })
     const data = await res.json()
     if (data.code === 200) {
       user.status = removed ? 3 : 1
@@ -1332,19 +1463,24 @@ watch(currentTab, (tab) => {
   }
 })
 
+/** 登录成功后加载首屏数据；刷新页面时若已有 token 也走这里 */
+async function loadInitialData() {
+  await fetchCurrentActivity().catch(() => {})
+  // 部分 tab 依赖 currentActivity，要等它加载完再拉
+  fetchPrizes()
+  const tab = currentTab.value
+  if (tab === 'screen') fetchScreenConfig()
+  if (tab === 'history') fetchHistoryActivities()
+  if (tab === 'users') {
+    fetchAllUsers()
+    fetchOnlineUsers()
+  }
+}
+
 onMounted(() => {
-  fetchCurrentActivity().then(() => {
-    // 加载当前 tab 的数据（刷新后 watch 不触发，需手动加载）
-    // 部分 tab 依赖 currentActivity，需等其加载完成
-    fetchPrizes()
-    const tab = currentTab.value
-    if (tab === 'screen') fetchScreenConfig()
-    if (tab === 'history') fetchHistoryActivities()
-    if (tab === 'users') {
-      fetchAllUsers()
-      fetchOnlineUsers()
-    }
-  })
+  // 没有 token 就不发任何请求，否则会一连串 403 把控制台刷满
+  if (!isAuthed.value) return
+  loadInitialData()
   fetchSensitiveWords()
 })
 </script>
@@ -1393,6 +1529,137 @@ onMounted(() => {
 }
 
 /* 侧边栏 */
+/* ============ 登录页 ============ */
+.login-page {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: radial-gradient(circle at 20% 20%, #1e293b 0%, #0f172a 55%, #020617 100%);
+  padding: 24px;
+}
+
+.login-card {
+  width: 100%;
+  max-width: 400px;
+  background: rgba(255, 255, 255, 0.98);
+  border-radius: 16px;
+  padding: 36px 32px 32px;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.45);
+}
+
+.login-brand {
+  text-align: center;
+  margin-bottom: 28px;
+}
+
+.login-logo {
+  font-size: 40px;
+  line-height: 1;
+  margin-bottom: 12px;
+}
+
+.login-brand h1 {
+  font-size: 21px;
+  font-weight: 700;
+  color: var(--color-text);
+  letter-spacing: -0.3px;
+}
+
+.login-brand p {
+  margin-top: 6px;
+  font-size: 13px;
+  color: var(--color-text-muted);
+}
+
+.login-form label {
+  display: block;
+  margin-bottom: 16px;
+}
+
+.login-form label span {
+  display: block;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--color-text-secondary);
+  margin-bottom: 6px;
+}
+
+.login-form input {
+  width: 100%;
+  padding: 11px 13px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  font-size: 14px;
+  color: var(--color-text);
+  background: var(--color-bg);
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+.login-form input:focus {
+  outline: none;
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15);
+  background: #fff;
+}
+
+.login-error {
+  margin-bottom: 14px;
+  font-size: 13px;
+  color: var(--color-danger);
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  border-radius: 6px;
+  padding: 8px 10px;
+}
+
+.login-form button[type="submit"] {
+  width: 100%;
+  padding: 12px;
+  border: none;
+  border-radius: 8px;
+  background: var(--color-primary);
+  color: #fff;
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+  letter-spacing: 1px;
+  transition: background 0.15s;
+}
+
+.login-form button[type="submit"]:hover:not(:disabled) {
+  background: var(--color-primary-dark);
+}
+
+.login-form button[type="submit"]:disabled {
+  opacity: 0.65;
+  cursor: not-allowed;
+}
+
+/* ============ 侧边栏底部：退出登录 ============ */
+.sidebar-footer {
+  padding: 14px 16px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.btn-logout {
+  width: 100%;
+  padding: 9px;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 6px;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.75);
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.btn-logout:hover {
+  background: rgba(239, 68, 68, 0.15);
+  border-color: rgba(239, 68, 68, 0.5);
+  color: #fca5a5;
+}
+
 .sidebar {
   width: 240px;
   background: var(--color-sidebar);

@@ -56,14 +56,22 @@ public class ScreenConfigServiceImpl extends ServiceImpl<ScreenConfigMapper, Scr
 
     @Override
     public ScreenConfig updateBackground(String type, MultipartFile file) {
+        validateType(type, file);
+
         ScreenConfig config = getConfig();
-        deleteFile(config.getBackgroundUrl());
+        String oldUrl = config.getBackgroundUrl();
+
+        // 先上传成功，再删旧文件。
+        // 原实现是先 deleteFile(旧) 再 uploadFile(新)，一旦上传失败：
+        // 旧背景已经被删掉，而数据库里的 URL 还指着它 —— 大屏直接空白且不可恢复。
+        String newUrl = uploadFile(file);
 
         config.setBackgroundType(type);
-        config.setBackgroundUrl(uploadFile(file));
+        config.setBackgroundUrl(newUrl);
         saveOrUpdate(config);
 
         redisUtil.delete(SCREEN_CONFIG_KEY);
+        deleteFile(oldUrl);
         return config;
     }
 
@@ -80,14 +88,20 @@ public class ScreenConfigServiceImpl extends ServiceImpl<ScreenConfigMapper, Scr
 
     @Override
     public ScreenConfig updateMobileBackground(String type, MultipartFile file) {
+        validateType(type, file);
+
         ScreenConfig config = getConfig();
-        deleteFile(config.getMobileBackgroundUrl());
+        String oldUrl = config.getMobileBackgroundUrl();
+
+        // 同样先传新的，成功后再删旧的
+        String newUrl = uploadFile(file);
 
         config.setMobileBackgroundType(type);
-        config.setMobileBackgroundUrl(uploadFile(file));
+        config.setMobileBackgroundUrl(newUrl);
         saveOrUpdate(config);
 
         redisUtil.delete(SCREEN_CONFIG_KEY);
+        deleteFile(oldUrl);
         return config;
     }
 
@@ -115,7 +129,30 @@ public class ScreenConfigServiceImpl extends ServiceImpl<ScreenConfigMapper, Scr
     }
 
     /**
+     * 校验背景类型与文件内容是否匹配
+     *
+     * 原实现直接采信前端传来的 type 并落库，于是可以出现
+     * 「type=video 但文件是图片」，大屏会拿 <video src="xxx.png"> 渲染，直接黑屏。
+     */
+    private void validateType(String type, MultipartFile file) {
+        if (!"image".equals(type) && !"video".equals(type)) {
+            throw new BusinessException("背景类型只能是 image 或 video");
+        }
+        if ("image".equals(type) && !FileUploadUtil.isImage(file)) {
+            throw new BusinessException(
+                    "文件不是有效的图片：只支持 jpg/png/gif/webp，且不超过 10MB");
+        }
+        if ("video".equals(type) && !FileUploadUtil.isVideo(file)) {
+            throw new BusinessException(
+                    "文件不是有效的视频：只支持 mp4/webm/ogg，且不超过 100MB");
+        }
+    }
+
+    /**
      * 上传文件：OSS 优先，失败降级本地
+     *
+     * 这里不再重复做类型校验——Controller 的 isImage/isVideo 与 validateType 已经做过，
+     * 而两者内部都是同一套 detectSafeExtension（扩展名 + 大小 + 文件头），重复调用只是多读几次流。
      */
     private String uploadFile(MultipartFile file) {
         try {

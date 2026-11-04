@@ -10,8 +10,6 @@ public interface ParticipantService extends IService<Participant> {
 
     Participant register(ParticipantDTO dto);
 
-    Participant checkRegistered(Long activityId, String studentId);
-
     List<Participant> getByActivity(Long activityId);
 
     int getCountByActivity(Long activityId);
