@@ -30,7 +30,7 @@
           <span class="msg-content">{{ msg.content }}</span>
         </div>
         <div v-if="liveMessages.length === 0" class="empty-hint">
-          <div class="empty-icon">💬</div>
+          <div class="empty-icon">◈</div>
           <p>等待弹幕中...</p>
         </div>
       </div>
@@ -103,7 +103,7 @@
     <!-- 无活动 -->
     <div v-else-if="noActivity" class="empty-page">
       <div class="empty-content">
-        <div class="empty-icon-large">🎉</div>
+        <div class="empty-icon-large">◈</div>
         <h2>暂无活动</h2>
         <p>当前没有进行中的抽奖活动</p>
         <p class="sub-text">请稍后再试</p>
@@ -746,25 +746,73 @@ onUnmounted(() => {
      所有 var(--color-*) 都会失效：深色背景、白字、圆角全部回落成浏览器默认样式。 -->
 <style>
 :root {
-  --color-primary: #f59e0b;
-  --color-primary-dark: #d97706;
-  --color-bg: #0f0f0f;
-  --color-bg-light: #1a1a1a;
-  --color-bg-card: rgba(255, 255, 255, 0.03);
-  --color-border: rgba(255, 255, 255, 0.08);
-  --color-border-focus: rgba(245, 158, 11, 0.5);
-  --color-text: #f5f5f5;
-  --color-text-secondary: #a0a0a0;
-  --color-text-muted: #666;
-  --color-error: #ef4444;
-  --color-error-bg: rgba(239, 68, 68, 0.1);
-  --radius-sm: 8px;
+  /* ============================================================
+     移动端设计令牌 —— 与大屏同一套「暗夜香槟金」调性
+     毕业典礼手机端：参与感、仪式感、抢奖的紧张感
+     ============================================================ */
+
+  /* --- 暖调近黑 --- */
+  --color-bg: #0e0d0c;
+  --color-bg-light: #171614;
+  --color-bg-deep: #07070a;
+
+  /* --- 暖白文字 --- */
+  --color-text: #f5f1ea;
+  --color-text-secondary: rgba(245, 241, 234, 0.78);
+  --color-text-muted: rgba(245, 241, 234, 0.46);
+
+  /* --- 香槟金：唯一强调色 --- */
+  --color-primary: #d4af37;
+  --color-primary-bright: #f0c75e;
+  --color-primary-dark: #a8872a;
+  --color-primary-dim: rgba(212, 175, 55, 0.16);
+  --color-border-focus: rgba(212, 175, 55, 0.5);
+
+  /* --- 玻璃质感 --- */
+  --color-bg-card: rgba(245, 241, 234, 0.035);
+  --color-bg-card-strong: rgba(245, 241, 234, 0.065);
+  --color-border: rgba(245, 241, 234, 0.10);
+  --color-border-strong: rgba(245, 241, 234, 0.18);
+
+  /* --- 错误：赤陶色（与香槟金同族，不是刺眼红） --- */
+  --color-error: #c9784f;
+  --color-error-bg: rgba(201, 120, 79, 0.14);
+
+  /* --- 字体栈：系统衬线，不依赖 CDN --- */
+  --font-display: Georgia, 'Times New Roman', 'Songti SC', 'STSong', 'SimSun', serif;
+  --font-body: 'PingFang SC', 'Microsoft YaHei', 'Noto Sans SC', sans-serif;
+  --font-mono: 'SF Mono', 'JetBrains Mono', 'Consolas', monospace;
+
+  /* --- 字阶（1.25 小三度，适合小屏） --- */
+  --text-xs: 0.75rem;
+  --text-sm: 0.875rem;
+  --text-base: 1rem;
+  --text-lg: 1.25rem;
+  --text-xl: 1.5625rem;
+  --text-2xl: 1.953rem;
+  --text-3xl: 2.441rem;
+
+  /* --- 圆角 --- */
+  --radius-sm: 6px;
   --radius-md: 12px;
-  --radius-lg: 16px;
+  --radius-lg: 18px;
+  --radius-xl: 24px;
   --radius-full: 9999px;
-  --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.3);
-  --shadow-md: 0 4px 16px rgba(0, 0, 0, 0.4);
-  --shadow-lg: 0 8px 32px rgba(0, 0, 0, 0.5);
+
+  /* --- 阴影三级 --- */
+  --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.28);
+  --shadow-md: 0 8px 28px rgba(0, 0, 0, 0.34);
+  --shadow-lg: 0 24px 64px rgba(0, 0, 0, 0.42);
+
+  /* --- 金色光晕 --- */
+  --glow-gold: 0 0 36px rgba(212, 175, 55, 0.22);
+  --glow-gold-strong: 0 0 72px rgba(212, 175, 55, 0.36);
+
+  /* --- 动效 --- */
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --dur-fast: 160ms;
+  --dur-base: 320ms;
+  --dur-slow: 640ms;
 }
 </style>
 
@@ -860,8 +908,12 @@ onUnmounted(() => {
 }
 
 .empty-icon-large {
-  font-size: 64px;
-  margin-bottom: 24px;
+  font-family: var(--font-display);
+  font-size: 48px;
+  line-height: 1;
+  margin-bottom: var(--space-5);
+  color: var(--color-primary);
+  text-shadow: 0 0 36px rgba(212, 175, 55, 0.42);
 }
 
 .empty-content h2 {
@@ -941,9 +993,12 @@ onUnmounted(() => {
 }
 
 .empty-icon {
-  font-size: 48px;
-  margin-bottom: 16px;
-  opacity: 0.5;
+  font-family: var(--font-display);
+  font-size: 32px;
+  line-height: 1;
+  margin-bottom: var(--space-4);
+  color: var(--color-primary);
+  opacity: 0.62;
 }
 
 .live-input-bar {
@@ -1331,47 +1386,59 @@ onUnmounted(() => {
 /* 中奖结果常驻卡片（轮次结束后依然显示，保证能记下领奖码） */
 .my-prize-card {
   margin: 0 12px 8px;
-  padding: 16px 14px;
-  background: linear-gradient(135deg, rgba(245, 158, 11, 0.22), rgba(234, 88, 12, 0.16));
-  border: 1px solid rgba(251, 191, 36, 0.55);
-  border-radius: 14px;
+  padding: 22px 18px;
+  background:
+    radial-gradient(80% 120% at 50% 0%, rgba(212, 175, 55, 0.22), transparent 70%),
+    linear-gradient(160deg, rgba(212, 175, 55, 0.16), rgba(245, 241, 234, 0.04));
+  border: 1px solid rgba(212, 175, 55, 0.5);
+  border-radius: var(--radius-xl);
   text-align: center;
-  backdrop-filter: blur(10px);
-  animation: prizeIn 0.45s ease-out;
+  backdrop-filter: blur(20px) saturate(140%);
+  -webkit-backdrop-filter: blur(20px) saturate(140%);
+  box-shadow: var(--shadow-md), var(--glow-gold);
+  animation: prizeIn var(--dur-slow) var(--ease-out);
 }
 
 @keyframes prizeIn {
-  from { opacity: 0; transform: translateY(12px) scale(0.97); }
-  to { opacity: 1; transform: translateY(0) scale(1); }
+  from { opacity: 0; transform: translateY(18px) scale(0.96); filter: brightness(1.3); }
+  to { opacity: 1; transform: translateY(0) scale(1); filter: brightness(1); }
 }
 
 .my-prize-emoji {
-  font-size: 26px;
+  font-size: 30px;
   line-height: 1;
-  margin-bottom: 6px;
+  margin-bottom: var(--space-2);
 }
 
 .my-prize-title {
-  font-size: 17px;
+  font-family: var(--font-display);
+  font-size: var(--text-2xl);
   font-weight: 700;
-  color: #fbbf24;
-  letter-spacing: 1px;
+  letter-spacing: 0.08em;
+  color: var(--color-primary-bright);
+  text-shadow: 0 0 32px rgba(212, 175, 55, 0.5);
 }
 
 .my-prize-sub {
-  margin-top: 4px;
-  font-size: 13px;
-  color: rgba(255, 255, 255, 0.78);
+  margin-top: var(--space-2);
+  font-family: var(--font-body);
+  font-size: var(--text-sm);
+  letter-spacing: 0.12em;
+  color: var(--color-text-secondary);
 }
 
 .my-prize-code {
-  margin: 10px 0 6px;
-  font-size: 22px;
+  margin: var(--space-3) 0 var(--space-2);
+  /* 领奖码是用户要记下来的东西，必须够大够醒目 */
+  font-family: var(--font-mono);
+  font-size: var(--text-3xl);
   font-weight: 700;
-  letter-spacing: 4px;
-  color: #fff;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  text-shadow: 0 0 16px rgba(251, 191, 36, 0.7);
+  letter-spacing: 0.22em;
+  color: var(--color-primary-bright);
+  font-variant-numeric: tabular-nums;
+  text-shadow:
+    0 0 28px rgba(212, 175, 55, 0.6),
+    0 0 60px rgba(212, 175, 55, 0.32);
 }
 
 .my-prize-tip {
@@ -1434,14 +1501,92 @@ onUnmounted(() => {
 
 .seckill-btn {
   width: 100%;
-  padding: 12px;
+  min-height: 52px;  /* 触摸目标 ≥ 44px */
+  padding: 16px 20px;
   border: none;
-  border-radius: 10px;
-  font-size: 16px;
-  font-weight: 600;
-  color: #1f1300;
-  background: linear-gradient(135deg, #fbbf24, #f59e0b);
-  transition: transform 0.15s ease, opacity 0.15s ease;
+  border-radius: var(--radius-lg);
+  font-family: var(--font-display);
+  font-size: var(--text-lg);
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  color: #1f1400;
+  /* 香槟金渐变：主 CTA 的仪式感 */
+  background: linear-gradient(148deg,
+    var(--color-primary-bright) 0%,
+    var(--color-primary) 52%,
+    var(--color-primary-dark) 100%);
+  box-shadow:
+    var(--shadow-md),
+    0 0 0 1px rgba(212, 175, 55, 0.32),
+    var(--glow-gold);
+  cursor: pointer;
+  transition: transform var(--dur-fast) ease-out,
+              box-shadow var(--dur-fast) ease-out,
+              filter var(--dur-fast) ease-out;
+  position: relative;
+  overflow: hidden;
+}
+
+/* 顶部高光线，增加金属感 */
+.seckill-btn::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 8%;
+  right: 8%;
+  height: 1px;
+  background: linear-gradient(90deg,
+    transparent,
+    rgba(255, 255, 255, 0.6),
+    transparent);
+}
+
+.seckill-btn:hover {
+  filter: brightness(1.06);
+  box-shadow:
+    var(--shadow-md),
+    0 0 0 1px rgba(212, 175, 55, 0.5),
+    var(--glow-gold-strong);
+}
+
+.seckill-btn:active {
+  transform: scale(0.97);
+  filter: brightness(0.96);
+}
+
+.seckill-btn:disabled {
+  cursor: not-allowed;
+  filter: saturate(0.4) brightness(0.78);
+  box-shadow: var(--shadow-sm);
+}
+
+/* 未抢到时的次级状态 */
+.seckill-btn.lose {
+  background: linear-gradient(148deg,
+    rgba(245, 241, 234, 0.10) 0%,
+    rgba(245, 241, 234, 0.05) 100%);
+  color: var(--color-text-secondary);
+  box-shadow: var(--shadow-sm), 0 0 0 1px var(--color-border);
+}
+
+/* 中奖时的高亮状态 */
+.seckill-btn.won {
+  background: linear-gradient(148deg,
+    var(--color-primary-bright) 0%,
+    var(--color-primary) 100%);
+  color: #1f1400;
+  box-shadow: var(--shadow-md), var(--glow-gold-strong);
+  animation: winnerPulse 1.6s var(--ease-out) 2;
+}
+
+@keyframes winnerPulse {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.02); box-shadow: var(--shadow-lg), var(--glow-gold-strong); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .seckill-btn { transition: none; animation: none; }
+  .seckill-btn.won { animation: none; }
 }
 
 .seckill-btn:active:not(:disabled) {
