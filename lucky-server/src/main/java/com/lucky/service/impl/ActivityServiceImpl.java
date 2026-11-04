@@ -33,6 +33,12 @@ public class ActivityServiceImpl extends ServiceImpl<ActivityMapper, Activity>
 
     @Override
     public Activity createActivity(CreateActivityDTO dto) {
+        // 时间窗必须自洽，否则定时任务推进状态时会出现「已开始但还没到点」的矛盾状态
+        if (dto.getStartTime() != null && dto.getEndTime() != null
+                && dto.getStartTime().isAfter(dto.getEndTime())) {
+            throw new com.lucky.exception.BusinessException("开始时间不能晚于结束时间");
+        }
+
         Activity activity = new Activity();
         activity.setName(dto.getName());
         activity.setStatus(ActivityStatus.NOT_STARTED.getCode());
