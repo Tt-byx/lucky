@@ -167,12 +167,34 @@ def main():
     screen_line = ws_handshake(None, None, activity_id)
     check("大屏匿名连接允许", "101" in screen_line, screen_line)
 
-    # ---------- 7. 安全：登出后 JWT 失效 ----------
+    # ---------- 7. 领奖核销 ----------
+    sample_winner = (winners.get("data") or [{}])[0]
+    claim_code = sample_winner.get("claimCode")
+    if claim_code:
+        status, claimed = call("POST", "/api/lottery/claim?claimCode=%s" % claim_code, None, jwt)
+        check("按领奖码核销成功", claimed.get("code") == 200 and claimed["data"]["status"] == 1,
+              claimed)
+
+        status, again = call("POST", "/api/lottery/claim?claimCode=%s" % claim_code, None, jwt)
+        check("重复核销被拒绝", again.get("code") != 200, again)
+    else:
+        check("中奖记录带领奖码", False, "winners 里没有 claimCode")
+
+    # ---------- 8. 售罄语义 ----------
+    loser = next((u for u, r in zip(users, results)
+                  if (r[1].get("data") or {}).get("code") in (0, -3)), None)
+    if loser:
+        _, after_sold_out = call("POST", "/api/lottery/join/%d" % round_id, None, loser["token"])
+        code_after = (after_sold_out.get("data") or {}).get("code")
+        check("名额抢完后返回「已抢完」而不是「已结束」", code_after == 0,
+              after_sold_out.get("data"))
+
+    # ---------- 9. 安全：登出后 JWT 失效 ----------
     call("POST", "/api/auth/logout", None, jwt)
     after = call("GET", "/api/auth/me", None, jwt)
     check("登出后旧 JWT 立即失效", after[0] == 403 or after[1].get("code") != 200, after)
 
-    # ---------- 8. 可观测：Prometheus 指标 ----------
+    # ---------- 10. 可观测：Prometheus 指标 ----------
     status, body = call("GET", "/actuator/prometheus")
     text = json.dumps(body)[:0]  # 占位，指标是纯文本
     req = urllib.request.Request(BASE + "/actuator/prometheus")

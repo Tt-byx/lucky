@@ -10,8 +10,14 @@ COPY lucky-server/src ./src
 RUN mvn package -DskipTests -B
 
 FROM eclipse-temurin:17-jre-alpine
+
+# 容器默认时区是 UTC，LocalDateTime.now() 会比北京时间晚 8 小时，
+# 导致活动开始/结束时间判断、轮次时间窗全部偏移。必须显式设置时区。
+RUN apk add --no-cache tzdata
+ENV TZ=Asia/Shanghai
+
 WORKDIR /app
 COPY --from=builder /app/target/*.jar app.jar
 EXPOSE 8080
 # 使用生产环境配置
-ENTRYPOINT ["java", "-jar", "-Dspring.profiles.active=prod", "app.jar"]
+ENTRYPOINT ["java", "-jar", "-Dspring.profiles.active=prod", "-Duser.timezone=Asia/Shanghai", "app.jar"]

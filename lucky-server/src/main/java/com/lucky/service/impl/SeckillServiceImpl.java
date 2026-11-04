@@ -130,6 +130,11 @@ public class SeckillServiceImpl implements SeckillService {
             return fail(-3, "本轮未开始");
         }
         if (!"1".equals(String.valueOf(meta.get("status")))) {
+            // 名额抢完导致的结束，对用户说「已抢完」比「已结束」准确得多
+            String endReason = String.valueOf(meta.getOrDefault("endReason", ""));
+            if (endReason.contains("名额")) {
+                return fail(0, "手慢了，名额已抢完");
+            }
             return fail(-3, "本轮已结束");
         }
 
@@ -315,6 +320,8 @@ public class SeckillServiceImpl implements SeckillService {
         lotteryRoundMapper.updateById(update);
 
         stringRedisTemplate.opsForHash().put(RedisKeys.roundMeta(roundId), "status", "2");
+        // 记录结束原因，后面的请求据此区分「已抢完」和「被管理员结束」
+        stringRedisTemplate.opsForHash().put(RedisKeys.roundMeta(roundId), "endReason", reason);
 
         Map<String, Object> payload = new HashMap<>();
         payload.put("roundId", roundId);

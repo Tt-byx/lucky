@@ -42,8 +42,12 @@ public class ActivityController {
     public Result<Void> updateStatus(
             @Parameter(description = "活动ID", required = true)
             @PathVariable Long id,
-            @Parameter(description = "活动状态", required = true)
+            @Parameter(description = "活动状态：0未开始 1进行中 2已结束", required = true)
             @RequestParam Integer status) {
+        // 显式校验：@Validated 在 Controller 方法参数上依赖代理，实测不生效，这里直接判更可靠
+        if (status == null || status < 0 || status > 2) {
+            return Result.error(400, "状态只能是 0（未开始）/1（进行中）/2（已结束）");
+        }
         Activity activity = activityService.getById(id);
         if (activity == null) {
             return Result.error("活动不存在");

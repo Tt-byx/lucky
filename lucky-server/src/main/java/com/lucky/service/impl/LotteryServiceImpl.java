@@ -158,6 +158,40 @@ public class LotteryServiceImpl extends ServiceImpl<LotteryRoundMapper, LotteryR
     }
 
     @Override
+    public Winner claim(String claimCode) {
+        if (claimCode == null || claimCode.isBlank()) {
+            throw new BusinessException("领奖码不能为空");
+        }
+
+        Winner winner = winnerMapper.selectOne(new LambdaQueryWrapper<Winner>()
+                .eq(Winner::getClaimCode, claimCode.trim().toUpperCase())
+                .last("LIMIT 1"));
+
+        if (winner == null) {
+            throw new BusinessException("领奖码无效");
+        }
+        if (winner.getStatus() != null && winner.getStatus() == 1) {
+            throw new BusinessException("该奖品已领取，请勿重复核销");
+        }
+        if (winner.getStatus() != null && winner.getStatus() == 2) {
+            throw new BusinessException("该中奖记录已放弃");
+        }
+
+        Winner update = new Winner();
+        update.setId(winner.getId());
+        update.setStatus(1);
+        update.setClaimedAt(LocalDateTime.now());
+        winnerMapper.updateById(update);
+
+        winner.setStatus(1);
+        winner.setClaimedAt(update.getClaimedAt());
+
+        log.info("领奖核销成功: winnerId={}, roundId={}, participantId={}, claimCode={}",
+                winner.getId(), winner.getRoundId(), winner.getParticipantId(), claimCode);
+        return winner;
+    }
+
+    @Override
     public Integer getRemaining(Long roundId) {
         return seckillService.getRemaining(roundId);
     }

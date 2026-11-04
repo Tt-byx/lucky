@@ -72,6 +72,12 @@ public class LotteryController {
         return Result.ok(lotteryService.getRemaining(roundId));
     }
 
+    @Operation(summary = "领奖核销", description = "按领奖码核销，把中奖记录置为已领取")
+    @PostMapping("/claim")
+    public Result<Winner> claim(@RequestParam String claimCode) {
+        return Result.ok(lotteryService.claim(claimCode));
+    }
+
     // ==================== 用户端 ====================
 
     /**

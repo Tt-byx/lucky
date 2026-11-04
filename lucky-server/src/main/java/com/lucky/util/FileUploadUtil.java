@@ -22,6 +22,17 @@ public class FileUploadUtil {
         return file.getContentType() != null && VIDEO_TYPES.contains(file.getContentType());
     }
 
+    /**
+     * 本地存储目录
+     *
+     * 必须用绝对路径：MultipartFile.transferTo 传入相对路径时，
+     * Servlet 容器会基于自己的 multipart 临时目录去解析，
+     * 结果文件落到 /tmp/tomcat.xxx/work/... 下面，静态映射根本找不到。
+     */
+    public static Path getUploadDir() {
+        return Paths.get(UPLOAD_DIR).toAbsolutePath().normalize();
+    }
+
     public static String upload(MultipartFile file) throws IOException {
         String originalFilename = file.getOriginalFilename();
         String extension = "";
@@ -29,21 +40,25 @@ public class FileUploadUtil {
             extension = originalFilename.substring(originalFilename.lastIndexOf("."));
         }
         String newFilename = UUID.randomUUID().toString() + extension;
-        Path uploadPath = Paths.get(UPLOAD_DIR);
-        if (!Files.exists(uploadPath)) {
-            Files.createDirectories(uploadPath);
-        }
+
+        Path uploadPath = getUploadDir();
+        Files.createDirectories(uploadPath);
+
         Path filePath = uploadPath.resolve(newFilename);
         file.transferTo(filePath.toFile());
+
         return "/uploads/" + newFilename;
     }
 
     public static void delete(String url) {
-        if (url != null && url.startsWith("/uploads/")) {
-            try {
-                Files.deleteIfExists(Paths.get(url.substring(1)));
-            } catch (IOException e) {
-            }
+        if (url == null || !url.startsWith("/uploads/")) {
+            return;
+        }
+        try {
+            String filename = url.substring("/uploads/".length());
+            Files.deleteIfExists(getUploadDir().resolve(filename));
+        } catch (IOException e) {
+            // 删除失败不影响业务，留个文件而已
         }
     }
 }

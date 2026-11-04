@@ -70,6 +70,8 @@ public class SecurityConfig {
                         .requestMatchers("/api/scan/**").permitAll()
                         // 公开接口 - WebSocket 在线人数（大屏/移动端轮询）
                         .requestMatchers("/api/ws/**").permitAll()
+                        // 公开接口 - 本地存储的图片/视频（OSS 不可用时的降级路径）
+                        .requestMatchers("/uploads/**").permitAll()
                         // 抢奖接口：用户端没有 JWT，身份由扫码临时令牌在 Controller 内校验
                         .requestMatchers(HttpMethod.POST, "/api/lottery/join/**").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/lottery/result").permitAll()

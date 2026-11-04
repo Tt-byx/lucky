@@ -81,6 +81,9 @@ services:
       BASE_URL: http://101.201.233.194
     ports:
       - "8080:8080"
+    volumes:
+      # OSS 不可用时背景图会降级存到本地，挂个卷避免容器重建后图片全丢
+      - uploads-data:/app/uploads
     depends_on:
       mysql:
         condition: service_healthy
@@ -107,3 +110,4 @@ volumes:
   mysql-data:
   redis-data:
   rabbitmq-data:
+  uploads-data:

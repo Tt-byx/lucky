@@ -180,40 +180,6 @@ public class DanmakuServiceImpl extends ServiceImpl<DanmakuMapper, Danmaku>
     }
 
     @Override
-    public void reviewDanmaku(Long id, Integer status) {
-        Danmaku danmaku = getById(id);
-        if (danmaku != null) {
-            danmaku.setStatus(status);
-            updateById(danmaku);
-
-            // 如果审核通过，通过 MQ 异步广播到大屏（场次定向）
-            if (status == 1) {
-                Map<String, Object> data = new HashMap<>();
-                data.put(FIELD_ACTIVITY_ID, danmaku.getActivityId());
-                data.put(FIELD_PARTICIPANT_ID, danmaku.getParticipantId());
-                data.put(FIELD_CONTENT, danmaku.getContent());
-                data.put(FIELD_STATUS, 1);
-                data.put(FIELD_TIMESTAMP, System.currentTimeMillis());
-                if (danmaku.getParticipantId() != null) {
-                    Participant p = participantMapper.selectById(danmaku.getParticipantId());
-                    data.put(FIELD_PARTICIPANT_NAME, p != null ? p.getName() : "匿名");
-                } else {
-                    data.put(FIELD_PARTICIPANT_NAME, "匿名");
-                }
-                messageProducer.sendDanmaku(data);
-            }
-        }
-    }
-
-    @Override
-    public List<Danmaku> getPendingDanmakus(Long activityId) {
-        return list(new LambdaQueryWrapper<Danmaku>()
-                .eq(Danmaku::getActivityId, activityId)
-                .eq(Danmaku::getStatus, 0)
-                .orderByDesc(Danmaku::getCreatedAt));
-    }
-
-    @Override
     public List<Danmaku> getApprovedDanmakus(Long activityId) {
         return list(new LambdaQueryWrapper<Danmaku>()
                 .eq(Danmaku::getActivityId, activityId)

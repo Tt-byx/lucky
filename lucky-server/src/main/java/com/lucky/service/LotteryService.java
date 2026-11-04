@@ -37,6 +37,13 @@ public interface LotteryService extends IService<LotteryRound> {
     Winner getResult(Long roundId, Long participantId);
 
     /**
+     * 领奖核销：按领奖码把中奖记录置为已领取
+     *
+     * @return 核销后的中奖记录
+     */
+    Winner claim(String claimCode);
+
+    /**
      * 剩余名额
      */
     Integer getRemaining(Long roundId);

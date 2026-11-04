@@ -491,9 +491,6 @@ const rounds = ref([])
 const winnerRecords = ref([])
 const remainingMap = ref({})
 
-// 弹幕相关
-const pendingDanmakus = ref([])
-
 // 敏感词相关
 const newSensitiveWord = ref('')
 const sensitiveWords = ref([])
@@ -800,38 +797,6 @@ async function fetchRounds() {
     }
   } catch (e) {
     console.error(e)
-  }
-}
-
-// 获取待审核弹幕
-async function fetchPendingDanmakus() {
-  if (!currentActivity.value) return
-  try {
-    const res = await fetch(`${API_BASE}/api/danmaku/pending?activityId=${currentActivity.value.id}`)
-    const data = await res.json()
-    if (data.code === 200) {
-      pendingDanmakus.value = data.data
-    }
-  } catch (e) {
-    console.error(e)
-  }
-}
-
-// 审核弹幕
-async function reviewDanmaku(id, status) {
-  try {
-    const res = await fetch(`${API_BASE}/api/danmaku/${id}/review?status=${status}`, {
-      method: 'PUT'
-    })
-    const data = await res.json()
-    if (data.code === 200) {
-      pendingDanmakus.value = pendingDanmakus.value.filter(d => d.id !== id)
-    } else {
-      alert(data.message || '操作失败')
-    }
-  } catch (e) {
-    console.error('审核弹幕失败:', e)
-    alert('操作失败：' + e.message)
   }
 }
 
@@ -1357,7 +1322,6 @@ async function toggleLottery(user) {
 // 监听 tab 切换加载数据
 watch(currentTab, (tab) => {
   localStorage.setItem('admin_currentTab', tab)
-  if (tab === 'danmaku') fetchPendingDanmakus()
   if (tab === 'sensitive') fetchSensitiveWords()
   if (tab === 'screen') fetchScreenConfig()
   if (tab === 'activity') fetchRounds()
@@ -1374,7 +1338,6 @@ onMounted(() => {
     // 部分 tab 依赖 currentActivity，需等其加载完成
     fetchPrizes()
     const tab = currentTab.value
-    if (tab === 'danmaku') fetchPendingDanmakus()
     if (tab === 'screen') fetchScreenConfig()
     if (tab === 'history') fetchHistoryActivities()
     if (tab === 'users') {
