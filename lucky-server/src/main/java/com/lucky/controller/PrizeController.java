@@ -12,6 +12,7 @@ import com.lucky.mapper.WinnerMapper;
 import com.lucky.service.PrizeService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
 
@@ -33,7 +34,7 @@ public class PrizeController {
 
     @Operation(summary = "添加奖品")
     @PostMapping
-    public Result<Prize> add(@RequestBody Prize prize) {
+    public Result<Prize> add(@Valid @RequestBody Prize prize) {
         // 必须挂在真实存在的活动下，否则会创建出「幽灵奖品」——活动列表里根本看不到它
         if (prize.getActivityId() == null || activityMapper.selectById(prize.getActivityId()) == null) {
             return Result.error("活动不存在，请先创建活动");
@@ -58,7 +59,7 @@ public class PrizeController {
      */
     @Operation(summary = "更新奖品")
     @PutMapping("/{id}")
-    public Result<Void> update(@PathVariable Long id, @RequestBody Prize prize) {
+    public Result<Void> update(@PathVariable Long id, @Valid @RequestBody Prize prize) {
         Prize existing = prizeService.getById(id);
         if (existing == null) {
             return Result.error("奖品不存在");
@@ -71,6 +72,11 @@ public class PrizeController {
         }
         if (newTotal == null) {
             newTotal = 0;
+        }
+
+        // 显式判负：部分更新时 @Min 对没传的字段不生效，这里用合并后的值再校验一次
+        if (newStock < 0 || newTotal < 0) {
+            return Result.error("库存和总数都不能为负数");
         }
 
         // 已发放数量以 winner 表为准，比 Redis 里的预扣值更权威

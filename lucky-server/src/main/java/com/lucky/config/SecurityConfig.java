@@ -50,7 +50,8 @@ public class SecurityConfig {
                 .authorizeHttpRequests(auth -> auth
                         // 公开接口 - 活动查询
                         .requestMatchers(HttpMethod.GET, "/api/activity/current").permitAll()
-                        .requestMatchers(HttpMethod.GET, "/api/activity/history").permitAll()
+                        // 历史活动只有管理端在用，改成需认证，避免活动被匿名枚举
+                        // .requestMatchers(HttpMethod.GET, "/api/activity/history").permitAll()
                         // 参与者相关：只开放「注册」和「人数统计」。
                         // 原来这里是 /api/participant/** 全放行，后果是匿名就能拉
                         // /api/participant/list 拿到全场 2000 人的姓名、学号、手机号，
@@ -64,10 +65,13 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.GET, "/api/screen/danmaku-settings").permitAll()
                         // 公开接口 - WebSocket
                         .requestMatchers("/ws/**").permitAll()
-                        // 公开接口 - Swagger
-                        .requestMatchers("/swagger-ui/**", "/v3/api-docs/**", "/swagger-ui.html").permitAll()
-                        // 公开接口 - 健康检查
-                        .requestMatchers("/actuator/**").permitAll()
+                        // Swagger 文档包含全部接口清单，生产环境不公开；
+                        // 开发调试时登录管理端即可查看
+                        .requestMatchers("/swagger-ui/**", "/v3/api-docs/**", "/swagger-ui.html").authenticated()
+                        // 监控端点：只放行探活与 Prometheus 抓取，其余需认证
+                        .requestMatchers(HttpMethod.GET, "/actuator/health").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/actuator/prometheus").permitAll()
+                        .requestMatchers("/actuator/**").authenticated()
                         // 公开接口 - 登录
                         .requestMatchers("/api/auth/login").permitAll()
                         // 公开接口 - 扫码登录（移动端用户没有 JWT，凭 Redis 临时令牌鉴权）
@@ -81,7 +85,10 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.GET, "/api/lottery/result").permitAll()
                         // 抽奖只读查询：大屏和手机端都要读，属于公开信息
                         .requestMatchers(HttpMethod.GET, "/api/lottery/rounds").permitAll()
-                        .requestMatchers(HttpMethod.GET, "/api/lottery/winners").permitAll()
+                        // 中奖名单含「姓名 + 学号 + 领奖码」，绝不是公开信息。
+                        // 领奖码就是核销凭证，匿名可查等于谁都能冒领。
+                        // 只有管理端在用这个接口，落到 anyRequest().authenticated()。
+                        // .requestMatchers(HttpMethod.GET, "/api/lottery/winners").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/lottery/remaining").permitAll()
                         // 其他接口需要认证
                         .anyRequest().authenticated()
