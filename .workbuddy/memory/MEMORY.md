@@ -34,8 +34,29 @@
 - **容器内 Maven**：`docker/maven-settings.xml` 走阿里云，`Dockerfile.backend` 已引用。
 
 ## 测试资产
-- `test-report/seckill_test.py`：抢奖链路验证（17 项，含并发不超卖、两级去重、鉴权），**v2 主要回归脚本**。
-- `test-report/api_test.py`：v1 全接口回归（125 用例），**抽奖段已过时**（仍调 draw 接口），需重写。
+- `bench/smoke_test.py`：端到端冒烟 18 项（抢奖链路 + WS 鉴权 + JWT 黑名单 + Prometheus 指标）。
+- `bench/bench_join.py`：抢奖压测（连接复用、分批发请求），用法 `-n 用户数 -q 名额 -c 线程数`。
+- `bench/压测报告.md`：压测数据、调优动作、局限说明。
+- `缺陷.md`：已修复清单 F-01~F-12 + 待修复 D-01~D-12。
+
+## 架构要点（v2）
+- **秒杀链路**：Redis 元信息 → 资格校验 → `lua/seckill.lua` 原子扣减 → MQ → 异步落库。
+  三道防线：Redis 预扣 / DB `WHERE stock>0` / `winner` 唯一索引。
+- **WS 集群广播**：`WsClusterPublisher` publish 到 `lucky:ws:broadcast`，`WsClusterSubscriber` 收到后只推本地连接。
+  Handler 的公开方法是「集群范围」，`localXxx` 才是本机推送。
+- **WS 鉴权**：`WsAuthInterceptor` 要求带 participantId 时必须有有效扫码令牌；大屏匿名可连。
+- **JWT 黑名单**：登出后 token 立即失效，key 是 token 的 MD5，TTL 跟随剩余有效期。
+- **监控**：`/actuator/prometheus`，自定义 `lucky_seckill_join_total`、`lucky_ws_local_connections`。
+
+## 常用命令
+```bash
+# 单测（17 个）
+mvn -f lucky-server/pom.xml test
+# 冒烟
+python bench/smoke_test.py
+# 压测
+python bench/bench_join.py -n 500 -q 500 -c 50
+```
 
 ## 用户偏好（项目相关）
 - 改完文件不要替他执行 git 提交，**告诉他命令让他自己练手**。

@@ -4,6 +4,7 @@ import com.lucky.dto.LoginDTO;
 import com.lucky.dto.LoginVO;
 import com.lucky.dto.Result;
 import com.lucky.security.AdminUserDetails;
+import com.lucky.security.JwtBlacklistService;
 import com.lucky.util.JwtUtil;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -26,6 +27,7 @@ public class AuthController {
 
     private final AuthenticationManager authenticationManager;
     private final JwtUtil jwtUtil;
+    private final JwtBlacklistService jwtBlacklistService;
 
     @Operation(summary = "管理员登录", description = "管理员使用用户名和密码登录，获取JWT Token")
     @PostMapping("/login")
@@ -62,6 +64,20 @@ public class AuthController {
         } catch (Exception e) {
             return Result.error("用户名或密码错误");
         }
+    }
+
+    @Operation(summary = "退出登录", description = "把当前 JWT 加入黑名单，立即失效")
+    @PostMapping("/logout")
+    public Result<Void> logout(@RequestHeader(value = "Authorization", required = false) String authorization) {
+        if (authorization == null || authorization.isBlank()) {
+            return Result.ok();
+        }
+        String token = authorization.startsWith("Bearer ")
+                ? authorization.substring(7)
+                : authorization;
+        jwtBlacklistService.revoke(token, jwtUtil.getRemainingSeconds(token));
+        SecurityContextHolder.clearContext();
+        return Result.ok();
     }
 
     @Operation(summary = "获取当前用户信息", description = "获取当前已认证用户的信息")

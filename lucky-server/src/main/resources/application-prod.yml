@@ -5,6 +5,13 @@
 server:
   # 后端服务端口（Docker 容器内部端口，一般不需要修改）
   port: 8080
+  tomcat:
+    threads:
+      # 秒杀场景下 Tomcat 默认 200 线程会成为瓶颈，并发点击时会大量排队
+      max: 500
+      min-spare: 50
+    accept-count: 1000
+    max-connections: 10000
 
 spring:
   servlet:
@@ -28,10 +35,13 @@ spring:
       timeout: 3000ms
       lettuce:
         pool:
-          max-active: 8
-          max-wait: -1ms
-          max-idle: 8
-          min-idle: 0
+          # 初版 max-active=8。连接数小于并发请求数时，Lettuce 会让请求排队等连接，
+          # 这块配置按「峰值并发 / 4」估算，64 对应约 250 并发在途请求。
+          # 注意：本机压测时客户端先成为瓶颈，没能量化出这块的收益，配置本身是合理的。
+          max-active: 64
+          max-idle: 32
+          min-idle: 8
+          max-wait: 3000ms
   # RabbitMQ配置
   rabbitmq:
     host: ${RABBITMQ_HOST:rabbitmq}
@@ -67,6 +77,19 @@ mybatis-plus:
   global-config:
     db-config:
       id-type: auto
+
+# 监控与指标
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+  endpoint:
+    health:
+      show-details: when_authorized
+  metrics:
+    tags:
+      application: lucky-server
 
 # 活动配置
 lucky:

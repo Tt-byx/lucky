@@ -98,4 +98,19 @@ public class JwtUtil {
     private Boolean isTokenExpired(Claims claims) {
         return claims.getExpiration().before(new Date());
     }
+
+    /**
+     * 获取 Token 剩余有效期（秒）
+     * 登出拉黑时用来设置 Redis key 的 TTL，避免黑名单无限增长
+     */
+    public long getRemainingSeconds(String token) {
+        try {
+            Claims claims = getClaimsFromToken(token);
+            long remaining = (claims.getExpiration().getTime() - System.currentTimeMillis()) / 1000;
+            return Math.max(remaining, 0);
+        } catch (Exception e) {
+            log.warn("解析 Token 有效期失败: {}", e.getMessage());
+            return 0;
+        }
+    }
 }

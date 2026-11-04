@@ -287,7 +287,8 @@ async function fetchScreenConfig() {
 function connectWebSocket() {
   if (ws && ws.readyState === WebSocket.OPEN) return
 
-  const url = `${WS_URL}?participantId=${participant.value.id}&activityId=${activityId.value}`
+  // 握手需要带扫码令牌，后端会用它反查身份，防止冒充
+  const url = `${WS_URL}?participantId=${participant.value.id}&activityId=${activityId.value}&token=${encodeURIComponent(participantToken.value || '')}`
   ws = new WebSocket(url)
 
   ws.onopen = () => {

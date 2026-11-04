@@ -43,20 +43,4 @@ public class PrizeServiceImpl extends ServiceImpl<PrizeMapper, Prize>
                 .eq(Prize::getActivityId, activityId)
                 .orderByDesc(Prize::getCreatedAt));
     }
-
-    @Override
-    @Transactional(rollbackFor = Exception.class)
-    public boolean deductStock(Long prizeId, int quantity) {
-        Prize prize = getById(prizeId);
-        if (prize == null) {
-            throw new BusinessException("奖品不存在");
-        }
-
-        if (prize.getStock() < quantity) {
-            throw new BusinessException("奖品库存不足");
-        }
-
-        prize.setStock(prize.getStock() - quantity);
-        return updateById(prize);
-    }
 }

@@ -1,5 +1,11 @@
 server:
   port: 8080
+  tomcat:
+    threads:
+      max: 500
+      min-spare: 50
+    accept-count: 1000
+    max-connections: 10000
 
 spring:
   servlet:
@@ -72,6 +78,16 @@ mybatis-plus:
   global-config:
     db-config:
       id-type: auto
+
+# 监控与指标
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+  metrics:
+    tags:
+      application: lucky-server
 
 # 活动配置
 lucky:

@@ -71,10 +71,8 @@ public class DanmakuBatchPersister {
         if (batch.isEmpty()) return;
 
         try {
-            // 批量插入（MyBatis-Plus 批量）
-            for (Danmaku danmaku : batch) {
-                danmakuMapper.insert(danmaku);
-            }
+            // 一条 INSERT 多个 VALUES，一次网络往返完成
+            danmakuMapper.insertBatch(batch);
             log.debug("弹幕批量入库完成: {} 条", batch.size());
         } catch (Exception e) {
             log.error("弹幕批量入库失败: {} 条, 错误: {}", batch.size(), e.getMessage(), e);

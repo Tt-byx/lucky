@@ -53,6 +53,7 @@ public class SeckillServiceImpl implements SeckillService {
     private final WinnerMapper winnerMapper;
     private final MessageProducer messageProducer;
     private final LuckyWebSocketHandler webSocketHandler;
+    private final io.micrometer.core.instrument.MeterRegistry meterRegistry;
 
     /** 轮次缓存有效期：2 小时，足够覆盖一场典礼 */
     private static final long CACHE_HOURS = 2;
@@ -144,12 +145,7 @@ public class SeckillServiceImpl implements SeckillService {
         // 3. Lua 原子扣减：库存判断 + 两级去重 + DECR + 记录，一次完成
         Long result;
         try {
-            result = stringRedisTemplate.execute(
-                    seckillScript,
-                    List.of(RedisKeys.roundStock(roundId),
-                            RedisKeys.roundUsers(roundId),
-                            RedisKeys.activityWinners(activityId)),
-                    participantId.toString());
+            result = executeSeckillScript(roundId, activityId, participantId);
         } catch (Exception e) {
             log.error("抢奖脚本执行异常: roundId={}, participantId={}", roundId, participantId, e);
             return fail(-5, "系统繁忙，请稍后重试");
@@ -194,6 +190,7 @@ public class SeckillServiceImpl implements SeckillService {
         }
 
         log.info("抢奖成功: roundId={}, participantId={}, 剩余名额={}", roundId, participantId, remaining);
+        recordMetric(1);
 
         return JoinResultVO.builder()
                 .code(1)
@@ -210,16 +207,36 @@ public class SeckillServiceImpl implements SeckillService {
     @Override
     public void rollback(Long roundId, Long participantId, Long activityId) {
         try {
-            stringRedisTemplate.execute(
-                    rollbackScript,
-                    List.of(RedisKeys.roundStock(roundId),
-                            RedisKeys.roundUsers(roundId),
-                            RedisKeys.activityWinners(activityId)),
-                    participantId.toString());
+            executeRollbackScript(roundId, activityId, participantId);
             log.warn("抢奖已回滚: roundId={}, participantId={}", roundId, participantId);
         } catch (Exception e) {
             log.error("抢奖回滚失败，需人工介入: roundId={}, participantId={}", roundId, participantId, e);
         }
+    }
+
+    /**
+     * 执行抢奖 Lua 脚本
+     * 抽成 protected 方法是为了单测能 spy 覆盖返回值，不用去 mock Redis 的 varargs
+     */
+    protected Long executeSeckillScript(Long roundId, Long activityId, Long participantId) {
+        return stringRedisTemplate.execute(
+                seckillScript,
+                List.of(RedisKeys.roundStock(roundId),
+                        RedisKeys.roundUsers(roundId),
+                        RedisKeys.activityWinners(activityId)),
+                participantId.toString());
+    }
+
+    /**
+     * 执行回滚 Lua 脚本
+     */
+    protected Long executeRollbackScript(Long roundId, Long activityId, Long participantId) {
+        return stringRedisTemplate.execute(
+                rollbackScript,
+                List.of(RedisKeys.roundStock(roundId),
+                        RedisKeys.roundUsers(roundId),
+                        RedisKeys.activityWinners(activityId)),
+                participantId.toString());
     }
 
     @Override
@@ -308,10 +325,33 @@ public class SeckillServiceImpl implements SeckillService {
     }
 
     private JoinResultVO fail(int code, String message) {
+        recordMetric(code);
         return JoinResultVO.builder()
                 .code(code)
                 .message(message)
                 .won(false)
                 .build();
+    }
+
+    /**
+     * 记录抢奖结果指标
+     *
+     * 暴露到 /actuator/prometheus，用于观察成功/售罄/重复的比例，
+     * 这比翻日志判断「今天抢得顺不顺」直观得多。
+     */
+    private void recordMetric(int code) {
+        if (meterRegistry == null) {
+            return;
+        }
+        String tag = switch (code) {
+            case 1 -> "success";
+            case 0 -> "sold_out";
+            case -1 -> "duplicate";
+            case -2 -> "already_won";
+            case -3 -> "not_started";
+            case -4 -> "no_qualification";
+            default -> "error";
+        };
+        meterRegistry.counter("lucky.seckill.join", "result", tag).increment();
     }
 }

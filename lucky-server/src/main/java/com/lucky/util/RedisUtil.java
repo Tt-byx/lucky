@@ -101,6 +101,15 @@ public class RedisUtil {
     }
 
     /**
+     * 不存在时写入（SETNX），用于互斥重建缓存
+     *
+     * @return true 表示抢到了锁；false 表示已存在
+     */
+    public Boolean setIfAbsent(String key, Object value, long timeout, TimeUnit unit) {
+        return redisTemplate.opsForValue().setIfAbsent(key, value, timeout, unit);
+    }
+
+    /**
      * 获取Set中的所有成员
      */
     public java.util.Set<Object> setMembers(String key) {

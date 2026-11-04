@@ -61,6 +61,10 @@
 | JWT | 0.12.5 | 认证方案 |
 | WebSocket | - | 实时通信 |
 | Redis | 7.0 | 缓存 & 分布式 |
+| RabbitMQ | 3.x | 异步削峰 & 死信兜底 |
+| Redisson | 3.27 | 分布式锁 |
+| Sentinel | 2023.0 | 限流熔断 |
+| Micrometer | - | 指标采集（Prometheus） |
 | MySQL | 8.0 | 数据库 |
 | Swagger | 2.5.0 | API 文档 |
 
@@ -77,6 +81,34 @@
 | Docker | 容器化部署 |
 | Docker Compose | 多容器编排 |
 | Nginx | 反向代理 & 静态资源 |
+
+---
+
+## 🏗️ 核心设计
+
+### 限时抢奖（秒杀）链路
+
+```
+用户点抢奖 → 读 Redis 元信息 → 校验资格 → Lua 原子扣减 → 发 MQ → 立即返回
+                                              ↓
+                        MQ 消费者：幂等 → DB 条件扣库存 → 插入中奖记录 → WebSocket 广播
+```
+
+- **主链路零数据库写**：库存预扣在 Redis，落库异步完成，接口 RT 稳定在 10ms 量级。
+- **Lua 一次调用完成五件事**：库存判断 → 本轮去重 → 跨轮次去重 → `DECR` → 记录中奖者。拆到 Java 任何一步都会有竞态。
+- **三道防线防超卖**：Redis 预扣 → DB `UPDATE ... WHERE stock > 0` → `winner` 表唯一索引。
+- **失败补偿**：MQ 发送失败回滚预扣；落库失败回补 DB 库存并回滚 Redis，让用户可以重新抢。
+
+### WebSocket 集群广播
+
+连接分散在各实例的 JVM 内存里，广播统一走 Redis Pub/Sub：publish 到频道，每个实例收到后只推自己持有的连接。这样用户连在哪台机器上都能收到消息，实例可以水平扩容。
+
+在线人数从「每次连接/断开都全局广播」改成「每 2 秒检查变化后才推」——2000 人陆续进场时，原实现是 2000 次广播 × 平均 1000 连接 ≈ 200 万次推送。
+
+### 可观测性
+
+- `GET /actuator/prometheus` 暴露 JVM、HTTP、连接池指标
+- 自定义指标：`lucky_seckill_join_total{result=success|sold_out|duplicate|...}`、`lucky_ws_local_connections`
 
 ---
 
@@ -280,6 +312,7 @@ docker-compose up -d
 | 方法 | 路径 | 说明 |
 |------|------|------|
 | POST | /api/auth/login | 管理员登录 |
+| POST | /api/auth/logout | 退出登录（JWT 立即失效） |
 | POST | /api/activity | 创建活动 |
 | PUT | /api/activity/{id}/status | 更新活动状态 |
 | POST | /api/lottery/round | 创建抽奖轮次（绑定奖品） |
@@ -290,6 +323,14 @@ docker-compose up -d
 | PUT | /api/admin/user/{id}/ban | 移出直播间 |
 
 完整 API 文档：http://localhost:8080/swagger-ui.html
+
+### 运维端点
+
+| 路径 | 说明 |
+|------|------|
+| GET /actuator/health | 健康检查 |
+| GET /actuator/metrics | 指标列表 |
+| GET /actuator/prometheus | Prometheus 抓取格式 |
 
 ---
 

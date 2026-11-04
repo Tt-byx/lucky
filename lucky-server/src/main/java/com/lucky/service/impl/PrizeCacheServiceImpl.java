@@ -67,22 +67,60 @@ public class PrizeCacheServiceImpl implements PrizeCacheService {
         String listKey = PRIZE_LIST_KEY + activityId;
         Object cached = redisUtil.get(listKey);
 
-        if (cached != null && cached instanceof List) {
+        // 空列表也算命中：活动确实没配奖品时缓存一个空集合，避免每次都打到 DB（缓存穿透）
+        if (cached instanceof List) {
             return (List<Prize>) cached;
         }
 
-        // 缓存未命中，查询 DB 并回写
-        List<Prize> prizes = prizeMapper.selectList(
-                new LambdaQueryWrapper<Prize>()
-                        .eq(Prize::getActivityId, activityId)
-                        .orderByAsc(Prize::getId)
-        );
+        return loadWithMutex(activityId, listKey);
+    }
 
-        if (!prizes.isEmpty()) {
-            redisUtil.set(listKey, prizes, CACHE_EXPIRE_HOURS, TimeUnit.HOURS);
+    /**
+     * 互斥重建：只有一个线程去查库，其余线程短暂自旋等待
+     * 热点活动开场瞬间如果缓存刚好失效，几千个请求同时查库会把 MySQL 打穿（缓存击穿）
+     */
+    @SuppressWarnings("unchecked")
+    private List<Prize> loadWithMutex(Long activityId, String listKey) {
+        String lockKey = "lucky:lock:prize:list:" + activityId;
+        boolean locked = false;
+
+        try {
+            for (int i = 0; i < 5; i++) {
+                Boolean ok = redisUtil.setIfAbsent(lockKey, "1", 5, TimeUnit.SECONDS);
+                if (Boolean.TRUE.equals(ok)) {
+                    locked = true;
+                    break;
+                }
+                try {
+                    Thread.sleep(30);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    break;
+                }
+                Object cached = redisUtil.get(listKey);
+                if (cached instanceof List) {
+                    return (List<Prize>) cached;
+                }
+            }
+
+            List<Prize> prizes = prizeMapper.selectList(
+                    new LambdaQueryWrapper<Prize>()
+                            .eq(Prize::getActivityId, activityId)
+                            .orderByAsc(Prize::getId)
+            );
+
+            if (prizes.isEmpty()) {
+                // 空结果缓存 1 分钟，足够挡住缓存穿透，又不至于让新配置的奖品迟迟不出现
+                redisUtil.set(listKey, prizes, 1, TimeUnit.MINUTES);
+            } else {
+                redisUtil.set(listKey, prizes, CACHE_EXPIRE_HOURS, TimeUnit.HOURS);
+            }
+            return prizes;
+        } finally {
+            if (locked) {
+                redisUtil.delete(lockKey);
+            }
         }
-
-        return prizes;
     }
 
     @Override
