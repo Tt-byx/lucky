@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   mysql:
     build:
@@ -29,7 +27,9 @@ services:
     container_name: lucky-redis
     ports:
       - "6379:6379"
-    command: redis-server --appendonly yes
+    # 本地也设密码：与生产形态一致（application-prod 的 ${REDIS_PASSWORD:} 落成空串时，
+    # Redisson 会把空串当「已配置密码」发 AUTH，被无密码的 Redis 拒绝——不要依赖空串语义）
+    command: ["redis-server", "--appendonly", "yes", "--requirepass", "lucky-dev-redis"]
     volumes:
       - redis-data:/data
     healthcheck:
@@ -72,6 +72,7 @@ services:
       DB_PASSWORD: 123456
       REDIS_HOST: redis
       REDIS_PORT: 6379
+      REDIS_PASSWORD: lucky-dev-redis
       RABBITMQ_HOST: rabbitmq
       RABBITMQ_PORT: 5672
       RABBITMQ_USERNAME: guest
@@ -99,9 +100,11 @@ services:
       dockerfile: docker/Dockerfile.frontend
     container_name: lucky-frontend
     ports:
-      - "5173:5173"
-      - "5174:5174"
-      - "5175:5175"
+      # 统一入口（与生产一致）：80 一个端口按路径分发
+      #   手机端 http://localhost/          大屏 http://localhost/screen/
+      #   管理端 http://localhost/admin/    API/WS/uploads 由 nginx 转发
+      # 原 5173/5174/5175 三端口入口已移除，bench/e2e 脚本的 URL 已同步更新
+      - "80:80"
     depends_on:
       - backend
     restart: unless-stopped
@@ -126,6 +129,7 @@ services:
       DB_PASSWORD: 123456
       REDIS_HOST: redis
       REDIS_PORT: 6379
+      REDIS_PASSWORD: lucky-dev-redis
       RABBITMQ_HOST: rabbitmq
       RABBITMQ_PORT: 5672
       RABBITMQ_USERNAME: guest
@@ -157,6 +161,7 @@ services:
       DB_PASSWORD: 123456
       REDIS_HOST: redis
       REDIS_PORT: 6379
+      REDIS_PASSWORD: lucky-dev-redis
       RABBITMQ_HOST: rabbitmq
       RABBITMQ_PORT: 5672
       RABBITMQ_USERNAME: guest

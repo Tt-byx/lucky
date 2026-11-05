@@ -12,9 +12,9 @@ const { Recorder, grepBackend } = require('./lib');
 
 const CHROME = 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe';
 const URLS = {
-  admin: 'http://localhost:5175/',
-  mobile: 'http://localhost:5174/',
-  screen: 'http://localhost:5173/'
+  admin: 'http://localhost/admin/',
+  mobile: 'http://localhost/',
+  screen: 'http://localhost/screen/'
 };
 const RUN = String(Date.now()).slice(-6);
 
@@ -99,7 +99,7 @@ const PNG_B64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8B
     rec.check('配置已指向新上传的文件', bgUrl.startsWith('/uploads/'), bgUrl);
 
     if (bgUrl) {
-      const imgResp = await adminPage.request.get(`http://localhost:5175${bgUrl}`);
+      const imgResp = await adminPage.request.get(`http://localhost${bgUrl}`);
       rec.check('背景图可通过 nginx 访问', imgResp.status() === 200, { status: imgResp.status() });
     }
 

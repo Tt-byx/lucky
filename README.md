@@ -264,21 +264,26 @@ scp lucky-images.tar root@your-server:/root/
 # 4. 在服务器上加载镜像
 docker load -i lucky-images.tar
 
-# 5. 启动服务
-mv docker-compose.prod.yml docker-compose.yml
-docker-compose up -d
+# 5. 配置密码（必须！漏配会导致启动失败而不是裸奔上线）
+cp .env.example .env
+vi .env   # 改掉全部 change-me 占位密码，可用 openssl rand -hex 16 生成
+
+# 6. 启动服务
+docker-compose -f docker-compose.prod.yml up -d
 ```
 
-### 端口说明
+### 端口说明（统一入口形态）
 
-| 服务 | 端口 | 说明 |
+| 访问入口 | 地址 | 说明 |
 |------|------|------|
-| 后端 API | 8080 | Spring Boot |
-| 大屏展示 | 5173 | Nginx |
-| 手机端 | 5174 | Nginx |
-| 管理后台 | 5175 | Nginx |
-| MySQL | 3306 | 数据库 |
-| Redis | 6379 | 缓存 |
+| 手机端（扫码入口） | http://服务器IP/ | 根路径 |
+| 大屏展示 | http://服务器IP/screen/ | 投影仪打开 |
+| 管理后台 | http://服务器IP/admin/ | 建议加 IP 白名单 |
+| 后端 API（本机调试） | http://127.0.0.1:8080 | 只绑回环，公网不可达 |
+
+- 一个 nginx（80 端口）按路径分发三端，`/api` `/ws` `/uploads` 转发给后端
+- MySQL / Redis / RabbitMQ **不映射任何宿主机端口**，只在容器网络内互访
+- 域名 + ICP 备案完成后在 nginx server 上补 443 ssl 监听即可，前端无需重新构建
 
 ---
 
@@ -355,8 +360,11 @@ REDIS_PASSWORD=
 JWT_SECRET=your-secret-key-here
 JWT_EXPIRATION=86400000  # 24小时
 
-# 前端访问地址
-BASE_URL=http://your-server-ip
+# 中间件密码（生产环境写入服务器上的 .env 文件，参考 .env.example）
+MYSQL_ROOT_PASSWORD=...
+REDIS_PASSWORD=...
+RABBITMQ_USERNAME=...
+RABBITMQ_PASSWORD=...
 ```
 
 ---

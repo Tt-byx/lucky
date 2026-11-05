@@ -14,7 +14,7 @@ const CHROME = 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe';
   });
   const ctx = await browser.newContext({ viewport: { width: 1440, height: 810 } });
   const page = await ctx.newPage();
-  await page.goto('http://localhost:5173/', { waitUntil: 'domcontentloaded' });
+  await page.goto('http://localhost/screen/', { waitUntil: 'domcontentloaded' });
   await page.waitForTimeout(3000);
 
   const info = await page.evaluate(() => {

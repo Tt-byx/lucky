@@ -23,7 +23,8 @@
         muted loop autoplay playsinline
       ></video>
 
-      <!-- 消息滚动区 -->
+      <!-- 消息滚动区：手机端不接收全场弹幕（服务端只推大屏，省的是真金白银的公网带宽），
+           这里只展示「我自己发出的弹幕」作为发送成功的本地回显 -->
       <div class="message-area" ref="messageArea">
         <div v-for="(msg, idx) in liveMessages" :key="idx" class="live-msg">
           <span class="msg-sender">{{ msg.sender }}</span>
@@ -31,7 +32,8 @@
         </div>
         <div v-if="liveMessages.length === 0" class="empty-hint">
           <div class="empty-icon">◈</div>
-          <p>等待弹幕中...</p>
+          <p>弹幕将在会场大屏展示</p>
+          <p class="empty-sub">在下方发言，全场都能在大屏上看到</p>
         </div>
       </div>
 
@@ -335,20 +337,8 @@ function connectWebSocket() {
     try {
       const msg = JSON.parse(event.data)
       switch (msg.type) {
-        case 'danmaku':
-          appendLiveMessage(msg.data)
-          break
-        case 'danmaku_batch':
-          // 服务端批量推送，data 是 JSON 字符串数组；缺这个分支手机端会漏掉绝大多数弹幕
-          (msg.data || []).forEach(raw => {
-            try {
-              const inner = typeof raw === 'string' ? JSON.parse(raw) : raw
-              if (inner && inner.data) appendLiveMessage(inner.data)
-            } catch (e) {
-              console.error('弹幕批量解析失败:', e, raw)
-            }
-          })
-          break
+        // danmaku / danmaku_batch 分支已移除：服务端不再向手机端推送弹幕（只推大屏）。
+        // 自己发的弹幕由 sendDanmaku 成功后本地回显。
         case 'muted':
           alert(msg.data || '您已被管理员禁言')
           break
@@ -642,8 +632,9 @@ async function fetchRemaining(roundId) {
   }
 }
 
-// 往直播间消息流里追加一条弹幕
-// 单条（danmaku）和批量（danmaku_batch）两个分支共用，避免逻辑两处维护
+// 本地回显自己发出的弹幕。
+// 手机端已不接收全场弹幕（服务端只推大屏），所以发送成功后必须在这里
+// 手动插一条，否则「发出去了」这件事没有任何视觉反馈。
 function appendLiveMessage(data) {
   if (!data || !data.content) return
   liveMessages.value.push({
@@ -685,6 +676,9 @@ async function sendDanmaku() {
 
     if (data.code === 200) {
       danmakuText.value = ''
+      // 发送成功本地回显：服务端不向手机端推送弹幕，不补这条的话
+      // 自己刚发的消息自己永远看不到
+      appendLiveMessage({ participantName: '我', content: text })
     } else {
       alert(data.message || '发送失败')
     }
@@ -990,6 +984,13 @@ onUnmounted(() => {
   color: var(--color-text-muted);
   font-size: 14px;
   padding: 60px 0;
+}
+
+.empty-sub {
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--color-text-muted);
+  opacity: 0.7;
 }
 
 .empty-icon {

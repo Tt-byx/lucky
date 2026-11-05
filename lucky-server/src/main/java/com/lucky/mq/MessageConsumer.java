@@ -185,11 +185,10 @@ public class MessageConsumer {
             // 原来这里无条件广播，等于「用户收到『已被拒绝』的提示，但违规内容照样打在 2000 人的大屏上」，
             // 敏感词过滤对整个现场是失效的。
             if (status == 1) {
-                if (activityId != null) {
-                    webSocketHandler.batchBroadcastDanmaku(activityId, "danmaku", danmakuData);
-                } else {
-                    webSocketHandler.broadcast("danmaku", danmakuData);
-                }
+                // 弹幕只推大屏（手机端不接收，理由见 batchBroadcastDanmaku 的注释）。
+                // activityId 缺失也统一走这里，handler 内部会按「只推大屏」处理，
+                // 不能用 broadcast（那会推给所有手机连接）。
+                webSocketHandler.batchBroadcastDanmaku(activityId, "danmaku", danmakuData);
             } else {
                 log.info("弹幕未通过审核，仅入库不广播: activityId={}, status={}, content={}",
                         activityId, status, danmakuData.get(FIELD_CONTENT));

@@ -17,9 +17,9 @@ const { Recorder, grepBackend } = require('./lib');
 
 const CHROME = 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe';
 const URLS = {
-  admin: 'http://localhost:5175/',
-  mobile: 'http://localhost:5174/',
-  screen: 'http://localhost:5173/'
+  admin: 'http://localhost/admin/',
+  mobile: 'http://localhost/',
+  screen: 'http://localhost/screen/'
 };
 
 // 每次跑用不同的后缀，避免历史活动/缓存干扰

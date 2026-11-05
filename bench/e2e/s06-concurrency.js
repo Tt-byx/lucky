@@ -45,7 +45,7 @@ function sh(cmd) {
   try {
     // ============================================================
     rec.step('大屏连接，观察心跳是否被正确续期');
-    await page.goto('http://localhost:5173/', { waitUntil: 'domcontentloaded' });
+    await page.goto('http://localhost/screen/', { waitUntil: 'domcontentloaded' });
     await page.waitForTimeout(3000);
 
     const openEvents = () => rec.events.filter(e => e.kind === 'ws-open' && e.role === 'screen').length;

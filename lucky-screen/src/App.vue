@@ -55,8 +55,18 @@
         <div class="qrcode-box">
           <div class="qrcode-glow"></div>
           <h3>扫码参与</h3>
-          <canvas ref="qrcodeCanvas" class="qrcode-canvas"></canvas>
-          <p class="qrcode-tip">微信扫一扫 · 即刻参与</p>
+          <!-- 第二层护栏生效时拒绝渲染二维码，明示原因；正常时显示码 + 可手输的地址 -->
+          <canvas v-if="!qrBlocked" ref="qrcodeCanvas" class="qrcode-canvas"></canvas>
+          <div v-else class="qrcode-blocked">
+            <p class="blocked-title">二维码不可用</p>
+            <p class="blocked-reason">
+              大屏正在通过本地地址访问，扫码会指向学生自己的手机。<br />
+              请在 .env.production 配置 VITE_MOBILE_URL 后重新构建，
+              或改用公网/局域网地址打开本页。
+            </p>
+          </div>
+          <p v-if="qrUrlText" class="qrcode-url">{{ qrUrlText }}</p>
+          <p class="qrcode-tip">微信扫一扫 · 即刻参与<template v-if="qrUrlText">（扫不出可手动输入上方地址）</template></p>
         </div>
       </div>
 
@@ -167,7 +177,21 @@ const API_BASE = import.meta.env.VITE_API_BASE ?? ''
 // WebSocket 地址按当前页面的协议和主机推导，避免写死 IP（换环境就要重新打包）
 const WS_URL = import.meta.env.VITE_WS_URL
   || `${location.protocol === 'https:' ? 'wss:' : 'ws:'}//${location.host}/ws/lucky`
-const MOBILE_URL = import.meta.env.VITE_MOBILE_URL || `${window.location.protocol}//${window.location.hostname}:5174`
+// ==================== 扫码入口 URL（三层防线） ====================
+// 第一层（根治）：生产构建时显式指定 .env.production 的 VITE_MOBILE_URL
+//                （域名备案下来后填，如 https://lucky.xxx.cn）。
+//                有值就完全不再依赖 hostname 推导。
+// 第二层（护栏）：没有显式配置、且页面是通过 localhost/127.0.0.1 打开时，
+//                推导出的二维码指向「学生自己的手机」，是 100% 无效的废码——
+//                检测到就直接拒绝生成，在大屏上报警告文字，把问题暴露在测试阶段。
+// 第三层（兜底）：二维码下方常驻显示 URL 文字，后排扫不出码的人可以手动输入。
+const EXPLICIT_MOBILE_URL = import.meta.env.VITE_MOBILE_URL || ''
+const IS_LOCAL_HOSTNAME = ['localhost', '127.0.0.1', '[::1]'].includes(window.location.hostname)
+// 统一入口后手机端部署在根路径（80/443 默认端口），推导时不再拼 :5174
+const MOBILE_URL = EXPLICIT_MOBILE_URL
+  || `${window.location.protocol}//${window.location.hostname}`
+const qrBlocked = ref(false)
+const qrUrlText = ref('')
 
 // 状态
 const participantCount = ref(0)
@@ -238,19 +262,30 @@ function getConfettiStyle(index) {
 
 // 生成二维码
 async function generateQRCode() {
-  if (qrcodeCanvas.value) {
-    try {
-      await QRCode.toCanvas(qrcodeCanvas.value, MOBILE_URL, {
-        width: 200,
-        margin: 2,
-        color: {
-          dark: '#ffffff',
-          light: '#00000000'
-        }
-      })
-    } catch (err) {
-      console.error('生成二维码失败:', err)
-    }
+  if (!qrcodeCanvas.value) {
+    return
+  }
+
+  // 第二层护栏：localhost 打开的大屏，二维码 100% 无效，拒绝生成并明示原因
+  if (!EXPLICIT_MOBILE_URL && IS_LOCAL_HOSTNAME) {
+    qrBlocked.value = true
+    qrUrlText.value = ''
+    return
+  }
+
+  try {
+    await QRCode.toCanvas(qrcodeCanvas.value, MOBILE_URL, {
+      width: 200,
+      margin: 2,
+      color: {
+        dark: '#ffffff',
+        light: '#00000000'
+      }
+    })
+    // 第三层兜底：显示可手动输入的地址（短域名时手输才可行，这就是要域名的原因之一）
+    qrUrlText.value = MOBILE_URL
+  } catch (err) {
+    console.error('生成二维码失败:', err)
   }
 }
 
@@ -884,6 +919,48 @@ onUnmounted(() => {
   border-radius: 12px;
   position: relative;
   z-index: 1;
+}
+
+/* 二维码下方常驻显示的地址文字：第三层兜底（扫不出码可以手输） */
+.qrcode-url {
+  margin-top: var(--space-3);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: var(--text-base);
+  letter-spacing: 0.04em;
+  color: var(--color-primary-bright);
+  position: relative;
+  z-index: 1;
+  word-break: break-all;
+}
+
+/* 第二层护栏触发时的占位提示 */
+.qrcode-blocked {
+  min-height: 200px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: var(--space-3);
+  padding: 0 var(--space-4);
+  position: relative;
+  z-index: 1;
+  border: 1px dashed rgba(229, 72, 72, 0.55);
+  border-radius: 12px;
+}
+
+.qrcode-blocked .blocked-title {
+  font-family: var(--font-display);
+  font-size: var(--text-xl);
+  font-weight: 700;
+  color: #f87171;
+  letter-spacing: 0.1em;
+}
+
+.qrcode-blocked .blocked-reason {
+  font-family: var(--font-body);
+  font-size: var(--text-sm);
+  line-height: 1.8;
+  color: var(--color-text-secondary);
+  text-align: left;
 }
 
 .qrcode-tip {

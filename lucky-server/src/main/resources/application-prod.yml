@@ -48,6 +48,8 @@ spring:
     redis:
       host: ${REDIS_HOST:redis}
       port: ${REDIS_PORT:6379}
+      # 密码由部署环境 .env 注入；留空表示无密码（本地裸跑 Redis 时）
+      password: ${REDIS_PASSWORD:}
       database: 0
       timeout: 3000ms
       lettuce:
@@ -63,8 +65,9 @@ spring:
   rabbitmq:
     host: ${RABBITMQ_HOST:rabbitmq}
     port: ${RABBITMQ_PORT:5672}
-    username: guest
-    password: guest
+    # 账密由部署环境 .env 注入，与容器创建时的 RABBITMQ_DEFAULT_USER/PASS 保持一致
+    username: ${RABBITMQ_USERNAME:guest}
+    password: ${RABBITMQ_PASSWORD:guest}
     virtual-host: /
     publisher-confirm-type: correlated
     publisher-returns: true
@@ -83,10 +86,11 @@ spring:
         dashboard: ${SENTINEL_DASHBOARD:}
         port: 8719
 
-# Redisson配置（Docker 环境 Redis 无密码，不配置 password）
+# Redisson配置（密码与 spring.data.redis 一致，由 .env 注入；空值 = 无密码）
 redisson:
   single-server-config:
     address: redis://${REDIS_HOST:redis}:${REDIS_PORT:6379}
+    password: ${REDIS_PASSWORD:}
 
 mybatis-plus:
   configuration:
