@@ -58,6 +58,7 @@ public class LuckyWebSocketHandler extends TextWebSocketHandler {
      *
      * 大屏在 onMounted 时就建连，此时活动信息还没拉回来，拿不到 activityId。
      * 如果只按场次推送，大屏就永远收不到弹幕和抢奖广播——所以这类连接按「全量监听」处理。
+     * 弹幕是这条规则的唯一例外：只推这里（unscoped），不推手机连接。
      */
     private final Set<String> unscopedSessions = ConcurrentHashMap.newKeySet();
 
@@ -260,13 +261,17 @@ public class LuckyWebSocketHandler extends TextWebSocketHandler {
     }
 
     /**
-     * 弹幕批量推送（集群范围）
+     * 弹幕推送（集群范围）。
+     *
+     * 手机端不接收弹幕推送：2000 人同时在线时，每条弹幕广播给全部手机连接是
+     * 「条数 × 在线人数」的流量放大（峰值可达百 Mbps 级公网出带宽），而手机端
+     * 小屏每秒能读的弹幕有限，全量推送是纯浪费。弹幕只推大屏（unscoped 连接）；
+     * 手机端保留发送入口，自己的发言由前端本地回显，发送反馈不受影响。
+     *
+     * activityId 为 null（理论不应发生）也统一走这里，由本地侧按「只推大屏」处理，
+     * 不能落到 broadcast（那会推给所有手机连接）。
      */
     public void batchBroadcastDanmaku(Long activityId, String type, Object data) {
-        if (activityId == null) {
-            broadcastToActivity(null, type, data);
-            return;
-        }
         clusterPublisher.publishDanmaku(activityId, type, data);
     }
 
@@ -331,6 +336,13 @@ public class LuckyWebSocketHandler extends TextWebSocketHandler {
         }, broadcastExecutor);
     }
 
+    /** 只推本机的大屏连接（无 participantId、无场次的 unscoped 连接）。弹幕的唯一接收方。 */
+    private void pushToUnscoped(TextMessage textMessage, String errorPrefix) {
+        for (String sessionId : unscopedSessions) {
+            pushOne(sessionId, textMessage, errorPrefix);
+        }
+    }
+
     /**
      * 只推本机持有的该用户连接
      */
@@ -378,11 +390,16 @@ public class LuckyWebSocketHandler extends TextWebSocketHandler {
     }
 
     /**
-     * 弹幕加入本机批量缓冲
+     * 弹幕加入本机批量缓冲。
+     *
+     * 只服务大屏：缓冲里的内容刷新时只推 unscoped 连接，
+     * 手机连接（activitySessionMap）不再参与，否则就是全量广播。
      */
     public void localBatchBroadcastDanmaku(Long activityId, String type, Object data) {
         if (activityId == null) {
-            localBroadcastToActivity(null, type, data);
+            // 无场次弹幕同样只推大屏。不能走 localBroadcastToActivity(null) →
+            // localBroadcast，那会把弹幕推给本机所有连接（包括手机端）。
+            pushToUnscoped(buildMessage(type, data), "大屏弹幕推送失败");
             return;
         }
 
@@ -416,10 +433,10 @@ public class LuckyWebSocketHandler extends TextWebSocketHandler {
             buffer.clear();
         }
 
-        Set<String> sessionIds = activitySessionMap.get(activityId);
-        boolean hasScoped = sessionIds != null && !sessionIds.isEmpty();
-        // 大屏没有 activityId，只按场次推会一条弹幕都收不到
-        if (!hasScoped && unscopedSessions.isEmpty()) {
+        // 弹幕只推大屏（unscoped 连接）。原实现把 batch 推给 activitySessionMap
+        // （全部手机连接）是流量放大的根源；大屏没有场次，只按场次推会一条都收不到。
+        // 当前没有大屏在线时缓冲已清空，直接丢弃，不堆积、不延迟。
+        if (unscopedSessions.isEmpty()) {
             return;
         }
 
@@ -428,11 +445,6 @@ public class LuckyWebSocketHandler extends TextWebSocketHandler {
         batchMsg.put("data", messages);
         TextMessage textMessage = new TextMessage(batchMsg.toJSONString());
 
-        if (hasScoped) {
-            for (String sessionId : sessionIds) {
-                pushOne(sessionId, textMessage, "批量推送失败");
-            }
-        }
         for (String sessionId : unscopedSessions) {
             pushOne(sessionId, textMessage, "大屏弹幕推送失败");
         }

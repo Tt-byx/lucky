@@ -46,7 +46,7 @@ function sh(cmd) {
   try {
     // ============================================================
     rec.step('大屏先连上 WS');
-    await page.goto('http://localhost:5173/', { waitUntil: 'domcontentloaded' });
+    await page.goto('http://localhost/screen/', { waitUntil: 'domcontentloaded' });
     await page.waitForTimeout(2500);
     rec.check('大屏 WS 已连接', rec.events.some(e => e.kind === 'ws-open' && e.role === 'screen'), null);
 

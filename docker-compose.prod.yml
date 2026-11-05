@@ -1,16 +1,24 @@
-version: '3.8'
+# ============================================================
+# 生产部署编排
+#
+# 安全基线（2026-11-05 改造）：
+# 1. 端口收敛：MySQL/Redis/RabbitMQ 不再映射宿主机端口，只允许
+#    同一 compose 网络内的容器互访（backend 用服务名连接）。
+#    公网只暴露 80（将来加 443）和 127.0.0.1 绑定的 8080（本机调试/压测）。
+# 2. 密码全部走同目录 .env 文件注入（复制 .env.example 修改），
+#    .env 被 .gitignore 忽略，不进 Git。
+#    ${VAR:?提示} 语法保证漏配时 compose 直接报错拒绝启动，而不是裸奔上线。
+# ============================================================
 
 services:
   mysql:
     image: lucky-mysql
     container_name: lucky-mysql
     environment:
-      MYSQL_ROOT_PASSWORD: 123456
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?请在 docker-compose.prod.yml 同目录创建 .env 并设置 MYSQL_ROOT_PASSWORD（参考 .env.example）}
       MYSQL_DATABASE: lucky
       MYSQL_CHARSET: utf8mb4
-    ports:
-      # 宿主机 3306 已被本机 MySQL 服务占用，改映射到 3307；容器内仍为 3306
-      - "3307:3306"
+    # 不再映射宿主机端口：数据库只允许容器网络内访问
     command: --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
     volumes:
       # 数据持久化：原编排缺失该卷，容器重建即丢库。如需重置数据执行 docker compose down -v
@@ -25,13 +33,14 @@ services:
   redis:
     image: redis:7-alpine
     container_name: lucky-redis
-    ports:
-      - "6379:6379"
-    command: redis-server --appendonly yes
+    # requirepass 强制密码访问；不再映射宿主机端口（公网无密码 Redis 是被入侵的重灾区）
+    command: ["redis-server", "--appendonly", "yes", "--requirepass", "${REDIS_PASSWORD:?请在 .env 中设置 REDIS_PASSWORD}"]
+    environment:
+      - REDIS_PASSWORD=${REDIS_PASSWORD:?请在 .env 中设置 REDIS_PASSWORD}
     volumes:
       - redis-data:/data
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD-SHELL", "redis-cli -a \"$$REDIS_PASSWORD\" ping | grep PONG"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -40,13 +49,12 @@ services:
   rabbitmq:
     image: rabbitmq:3-management-alpine
     container_name: lucky-rabbitmq
-    ports:
-      # 宿主机 5672/15672 被本机 RabbitMQ 占用；5673-5772 属 Windows 保留区间，故用 5773/15673
-      - "5773:5672"
-      - "15673:15672"
+    # 默认 guest/guest 只允许本机连接且人人皆知；显式创建专用账号并从 .env 注入
     environment:
-      RABBITMQ_DEFAULT_USER: guest
-      RABBITMQ_DEFAULT_PASS: guest
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USERNAME:?请在 .env 中设置 RABBITMQ_USERNAME}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:?请在 .env 中设置 RABBITMQ_PASSWORD}
+    # 5672（AMQP）与 15672（管理台）都不再对公网开放；
+    # 需要看管理台时在服务器上走 SSH 隧道或 docker exec
     volumes:
       - rabbitmq-data:/var/lib/rabbitmq
     healthcheck:
@@ -65,16 +73,17 @@ services:
       DB_PORT: 3306
       DB_NAME: lucky
       DB_USERNAME: root
-      DB_PASSWORD: 123456
+      DB_PASSWORD: ${MYSQL_ROOT_PASSWORD}
       REDIS_HOST: redis
       REDIS_PORT: 6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
       RABBITMQ_HOST: rabbitmq
       RABBITMQ_PORT: 5672
-      RABBITMQ_USERNAME: guest
-      RABBITMQ_PASSWORD: guest
-      BASE_URL: http://101.201.233.194
+      RABBITMQ_USERNAME: ${RABBITMQ_USERNAME}
+      RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD}
     ports:
-      - "8080:8080"
+      # 只绑回环：本机调试/压测（bench 脚本打 localhost:8080）可用，公网不可达
+      - "127.0.0.1:8080:8080"
     depends_on:
       mysql:
         condition: service_healthy
@@ -88,9 +97,9 @@ services:
     image: lucky-frontend
     container_name: lucky-frontend
     ports:
-      - "5173:5173"
-      - "5174:5174"
-      - "5175:5175"
+      # 统一入口：80 一个端口按路径分发三端 + /api /ws /uploads 转发
+      # 域名备案完成后在此之上补 443（nginx.conf 的 server 加 ssl 监听）
+      - "80:80"
     depends_on:
       - backend
     restart: unless-stopped

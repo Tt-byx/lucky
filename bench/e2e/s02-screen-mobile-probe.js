@@ -25,8 +25,8 @@ const CHROME = 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe';
   const screenPage = await screenCtx.newPage();
   rec.attach(screenPage, 'screen');
 
-  rec.step('打开大屏 5173');
-  await screenPage.goto('http://localhost:5173/', { waitUntil: 'domcontentloaded' });
+  rec.step('打开大屏 /screen/');
+  await screenPage.goto('http://localhost/screen/', { waitUntil: 'domcontentloaded' });
   await screenPage.waitForTimeout(4000);
   await rec.shot(screenPage, 'screen-home');
 
@@ -40,7 +40,9 @@ const CHROME = 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe';
     idle: idleVisible, active: activeVisible
   });
 
-  // 二维码 canvas 有没有真的画出东西
+  // 二维码区：显式配置过 VITE_MOBILE_URL 时 canvas 应画出码；
+  // 未配置 + localhost 打开时应触发第二层护栏（警告文案 + 拒绝生成），不允许静默空白
+  const blockedShown = await screenPage.locator('.qrcode-blocked').count();
   const qrHasContent = await screenPage.evaluate(() => {
     const c = document.querySelector('.qrcode-canvas');
     if (!c) return { found: false };
@@ -54,7 +56,11 @@ const CHROME = 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe';
       return { found: true, error: e.message };
     }
   });
-  rec.check('大屏二维码已绘制', qrHasContent.found && qrHasContent.nonBlankPixels > 100, qrHasContent);
+  if (blockedShown > 0) {
+    rec.check('localhost 打开时护栏生效（拒绝生成二维码并明示原因）', true, { blocked: true });
+  } else {
+    rec.check('大屏二维码已绘制', qrHasContent.found && qrHasContent.nonBlankPixels > 100, qrHasContent);
+  }
 
   // ---------- 手机端 ----------
   const mCtx = await browser.newContext({
@@ -66,8 +72,8 @@ const CHROME = 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe';
   const mPage = await mCtx.newPage();
   rec.attach(mPage, 'mobile');
 
-  rec.step('打开手机端 5174');
-  await mPage.goto('http://localhost:5174/', { waitUntil: 'domcontentloaded' });
+  rec.step('打开手机端 /');
+  await mPage.goto('http://localhost/', { waitUntil: 'domcontentloaded' });
   await mPage.waitForTimeout(4000);
   await rec.shot(mPage, 'mobile-home');
 

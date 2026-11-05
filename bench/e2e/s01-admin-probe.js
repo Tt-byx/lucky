@@ -9,7 +9,7 @@ const { chromium } = require('playwright');
 const { Recorder, grepBackend } = require('./lib');
 
 const CHROME = 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe';
-const ADMIN = 'http://localhost:5175/';
+const ADMIN = 'http://localhost/admin/';
 
 (async () => {
   const rec = new Recorder('probe-admin');
