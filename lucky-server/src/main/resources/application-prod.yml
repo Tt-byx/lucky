@@ -95,6 +95,8 @@ redisson:
 mybatis-plus:
   configuration:
     map-underscore-to-camel-case: true
+    # 生产环境关闭 SQL 打印（application.yml 的 StdOutImpl 在生产会打爆 stdout）
+    log-impl: org.apache.ibatis.logging.nologging.NoLoggingImpl
   global-config:
     db-config:
       id-type: auto
@@ -114,6 +116,10 @@ management:
 
 # 活动配置
 lucky:
+  # JWT 密钥必须从环境变量注入，漏配直接拒绝启动（比用默认密钥安全）
+  jwt:
+    secret: ${JWT_SECRET:?JWT_SECRET 环境变量未设置，请执行 openssl rand -hex 32 生成}
+    expiration: 86400000
   base-url: ${BASE_URL:http://localhost}
 
 # 阿里云 OSS 配置（可选）

@@ -18,6 +18,12 @@ ENV TZ=Asia/Shanghai
 
 WORKDIR /app
 COPY --from=builder /app/target/*.jar app.jar
+
+# 注：暂不以非 root 用户运行。named volume（logs-data / uploads-data）挂载后属主是 root，
+# 非 root 用户写不进去，除非加 entrypoint 先 chown。对单项目部署系统来说 root 运行可接受，
+# 后续要加固时加 entrypoint 脚本或用 initContainer 修权限。
+RUN mkdir -p /app/logs /app/uploads
+
 EXPOSE 8080
 # 使用生产环境配置
 ENTRYPOINT ["java", "-jar", "-Dspring.profiles.active=prod", "-Duser.timezone=Asia/Shanghai", "app.jar"]

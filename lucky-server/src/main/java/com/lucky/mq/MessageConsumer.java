@@ -2,6 +2,7 @@ package com.lucky.mq;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.lucky.config.RabbitConfig;
+import org.springframework.transaction.support.TransactionTemplate;
 import com.lucky.constant.RedisKeys;
 import com.lucky.entity.Danmaku;
 import com.lucky.entity.Participant;
@@ -48,6 +49,7 @@ public class MessageConsumer {
     private final WinnerMapper winnerMapper;
     private final ParticipantMapper participantMapper;
     private final SeckillService seckillService;
+    private final TransactionTemplate transactionTemplate;
     private final StringRedisTemplate stringRedisTemplate;
 
     /** MQ 消费重试计数 Redis key 前缀 */
@@ -92,19 +94,9 @@ public class MessageConsumer {
 
         boolean stockDeducted = false;
         try {
-            // 1. DB 库存兜底扣减：条件更新，库存不足时 affected = 0
-            int affected = prizeMapper.decreaseStock(prizeId);
-            if (affected == 0) {
-                // Redis 预扣成功但 DB 没库存，说明两侧已经不一致，必须回滚并告警
-                seckillService.rollback(roundId, participantId, activityId);
-                channel.basicAck(deliveryTag, false);
-                log.error("DB 库存不足，Redis 预扣与 DB 不一致: roundId={}, prizeId={}, participantId={}",
-                        roundId, prizeId, participantId);
-                return;
-            }
-            stockDeducted = true;
-
-            // 2. 写中奖记录，唯一索引兜底防重复
+            // 1+2. 库存扣减 + 写中奖记录：必须在同一事务里
+            // 原来是两步独立操作，进程在中间崩溃会导致「库存扣了但中奖记录没写」
+            // 用 TransactionTemplate 包裹，保证原子性
             Winner winner = new Winner();
             winner.setActivityId(activityId);
             winner.setRoundId(roundId);
@@ -114,16 +106,33 @@ public class MessageConsumer {
             winner.setClaimCode(generateClaimCode());
             winner.setCreatedAt(LocalDateTime.now());
 
+            Integer affected;
             try {
-                winnerMapper.insert(winner);
+                affected = transactionTemplate.execute(status -> {
+                    int a = prizeMapper.decreaseStock(prizeId);
+                    if (a == 0) {
+                        return 0;
+                    }
+                    winnerMapper.insert(winner);
+                    return 1;
+                });
             } catch (DuplicateKeyException e) {
-                // 同一人重复中奖，把刚扣的库存和 Redis 名额都还回去
-                prizeMapper.increaseStock(prizeId);
+                // 同一人重复中奖，把 Redis 名额还回去（库存由事务自动回滚）
                 seckillService.rollback(roundId, participantId, activityId);
                 channel.basicAck(deliveryTag, false);
                 log.warn("重复中奖记录，已回滚: roundId={}, participantId={}", roundId, participantId);
                 return;
             }
+
+            if (affected == null || affected == 0) {
+                // Redis 预扣成功但 DB 没库存，说明两侧已经不一致，必须回滚并告警
+                seckillService.rollback(roundId, participantId, activityId);
+                channel.basicAck(deliveryTag, false);
+                log.error("DB 库存不足，Redis 预扣与 DB 不一致: roundId={}, prizeId={}, participantId={}",
+                        roundId, prizeId, participantId);
+                return;
+            }
+            stockDeducted = true;
 
             // 3. 广播中奖结果到场次
             // 这里刻意不再查 count(*)：大屏的「已抢到 N 人」用的是自己收到的 winnerList.length，

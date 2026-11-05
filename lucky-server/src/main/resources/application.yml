@@ -97,6 +97,10 @@ management:
 
 # 活动配置
 lucky:
+  # JWT 配置（secret 必须通过环境变量注入）
+  jwt:
+    secret: ${JWT_SECRET:lucky-insecure-default-key-please-set-JWT_SECRET-env-32bytes!!}
+    expiration: 86400000
   base-url: http://172.27.59.47:5176
   # 弹幕限流配置
   danmaku:
