@@ -1,0 +1,138 @@
+# ============================================================
+# 告警规则
+#
+# 设计原则：
+# 1. 只告「需要人立刻处理的事」，不告「可以等的事」
+# 2. 分三级：critical（打电话）、warning（发消息）、info（记录）
+# 3. 每条规则都写清楚「为什么告」「该怎么处理」
+# ============================================================
+groups:
+  - name: lucky-critical
+    rules:
+      # ---- 服务不可用 ----
+      - alert: BackendDown
+        expr: up{job="lucky-backend"} == 0
+        for: 30s
+        labels:
+          severity: critical
+        annotations:
+          summary: "后端服务不可达"
+          description: "lucky-backend 已 30 秒无响应，检查容器是否崩溃：docker logs lucky-backend"
+          action: "docker restart lucky-backend"
+
+      - alert: RedisDown
+        expr: redis_up == 0
+        for: 15s
+        labels:
+          severity: critical
+        annotations:
+          summary: "Redis 不可用（秒杀/令牌/限流全部受影响）"
+          description: "Redis 已 15 秒无响应。抢奖、扫码登录、限流将退化。检查：docker logs lucky-redis"
+
+      - alert: MySQLDown
+        expr: mysql_up == 0
+        for: 15s
+        labels:
+          severity: critical
+        annotations:
+          summary: "MySQL 不可用"
+          description: "MySQL 已 15 秒无响应。所有 DB 操作将失败。检查：docker logs lucky-mysql"
+
+      - alert: RabbitMQDown
+        expr: rabbitmq_up == 0
+        for: 15s
+        labels:
+          severity: critical
+        annotations:
+          summary: "RabbitMQ 不可用（抢奖落库/弹幕广播将丢失）"
+          description: "RabbitMQ 已 15 秒无响应。抢奖消息和弹幕无法投递。检查：docker logs lucky-rabbitmq"
+
+      # ---- 超卖（最严重的业务错误） ----
+      - alert: SeckillOversold
+        expr: increase(lucky_reconcile_mismatch[5m]) > 0
+        for: 0s
+        labels:
+          severity: critical
+        annotations:
+          summary: "库存对账不一致（疑似超卖）"
+          description: "对账任务发现奖品库存与中奖记录不匹配。立即检查 lucky-server-error.log 中的「库存对账不一致」记录。"
+
+  - name: lucky-warning
+    rules:
+      # ---- 性能劣化 ----
+      - alert: HighErrorRate
+        expr: |
+          sum(rate(http_server_requests_seconds_count{status=~"5.."}[5m]))
+            / sum(rate(http_server_requests_seconds_count[5m])) > 0.05
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "5xx 错误率超过 5%"
+          description: "过去 5 分钟 5xx 错误占比 {{ $value | humanizePercentage }}，检查后端日志定位原因。"
+
+      - alert: HighLatency
+        expr: |
+          histogram_quantile(0.99,
+            sum(rate(http_server_requests_seconds_bucket{uri="/api/lottery/join*"}[5m])) by (le)
+          ) > 0.5
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "抢奖接口 p99 超过 500ms"
+          description: "抢奖接口 p99 = {{ $value }}s，正常应 < 120ms。可能原因：Redis 慢查询、GC 停顿、MQ 积压。"
+
+      # ---- MQ 积压 ----
+      - alert: MQDeadLetterGrowing
+        expr: increase(lucky_mq_dead_letter_total[10m]) > 3
+        for: 0s
+        labels:
+          severity: warning
+        annotations:
+          summary: "死信队列持续增长"
+          description: "10 分钟内有 {{ $value }} 条消息进入死信队列。检查 lucky-server-error.log 中的「死信消息」记录，手工处理丢失的数据。"
+
+      - alert: JvmMemoryHigh
+        expr: |
+          jvm_memory_used_bytes{area="heap"}
+            / jvm_memory_max_bytes{area="heap"} > 0.9
+        for: 3m
+        labels:
+          severity: warning
+        annotations:
+          summary: "JVM 堆内存使用率超过 90%"
+          description: "堆内存使用 {{ $value | humanizePercentage }}，可能即将 OOM。检查是否有内存泄漏。"
+
+      # ---- 连接池 ----
+      - alert: DbPoolExhausted
+        expr: |
+          hikaricp_connections_active
+            / hikaricp_connections_max > 0.9
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "数据库连接池使用率超过 90%"
+          description: "连接池活跃 {{ $value | humanizePercentage }}，新的 DB 请求将排队。考虑调大 maximum-pool-size 或排查慢 SQL。"
+
+  - name: lucky-info
+    rules:
+      - alert: SeckillSpike
+        expr: increase(lucky_seckill_join_total{result="success"}[1m]) > 50
+        for: 0s
+        labels:
+          severity: info
+        annotations:
+          summary: "1 分钟内成功抢奖超过 50 人次"
+          description: "正常抢奖节奏，仅作记录。"
+
+      - alert: WsConnectionDrop
+        expr: |
+          delta(lucky_ws_local_connections[2m]) < -20
+        for: 0s
+        labels:
+          severity: info
+        annotations:
+          summary: "WebSocket 连接 2 分钟内骤降超过 20"
+          description: "可能是大屏刷新、网络波动，或 WS 心跳问题。观察是否持续下降。"

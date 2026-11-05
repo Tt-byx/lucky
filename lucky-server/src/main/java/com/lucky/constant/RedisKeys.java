@@ -70,4 +70,24 @@ public final class RedisKeys {
     public static String joinRate(Long participantId) {
         return "lucky:join:rate:" + participantId;
     }
+
+    /**
+     * 管理端登录失败计数（String 计数器，15 分钟窗口）
+     *
+     * 同一用户名连续失败 5 次锁定 15 分钟，防暴力破解。
+     * 成功登录后必须删除该 key。
+     */
+    public static String loginFailCount(String username) {
+        return "lucky:login:fail:" + username;
+    }
+
+    /**
+     * 定时任务分布式锁（跨实例互斥）
+     *
+     * 多实例部署时 @Scheduled 会在每个实例都跑一遍，
+     * 跨实例任务（活动状态推进、库存对账）必须用这把锁保证只跑一份。
+     */
+    public static String schedulerLock(String taskName) {
+        return "lucky:scheduler:lock:" + taskName;
+    }
 }

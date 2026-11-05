@@ -51,13 +51,21 @@ public class RateLimitAspect {
         String limitKey = buildLimitKey(joinPoint, rateLimit);
 
         // 执行 Lua 限流脚本（原子操作）
-        List<String> keys = Collections.singletonList(limitKey);
-        Long result = stringRedisTemplate.execute(
-                rateLimitScript,
-                keys,
-                String.valueOf(rateLimit.maxCount()),
-                String.valueOf(rateLimit.windowSeconds())
-        );
+        // Redis 不可用时 fail-open：限流是防护措施不是业务逻辑，
+        // Redis 挂了不应该把所有请求打死，而是放行 + 打警告日志
+        Long result;
+        try {
+            List<String> keys = Collections.singletonList(limitKey);
+            result = stringRedisTemplate.execute(
+                    rateLimitScript,
+                    keys,
+                    String.valueOf(rateLimit.maxCount()),
+                    String.valueOf(rateLimit.windowSeconds())
+            );
+        } catch (Exception e) {
+            log.warn("限流 Redis 不可用，fail-open 放行: key={}, error={}", limitKey, e.getMessage());
+            return joinPoint.proceed();
+        }
 
         if (result == null || result == 0) {
             log.warn("请求被限流: key={}, maxCount={}/{}s", limitKey, rateLimit.maxCount(), rateLimit.windowSeconds());

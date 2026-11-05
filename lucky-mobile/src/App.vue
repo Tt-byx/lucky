@@ -49,13 +49,14 @@
         </div>
         <button
           class="seckill-btn"
-          :class="{ won: joinState === 'won', lose: joinState === 'lose' }"
+          :class="{ won: joinState === 'won', lose: joinState === 'lose', pulse: lastJoinLost && activeRound && joinState === 'idle' }"
           :disabled="joining || joinState !== 'idle'"
           @click="joinRound"
         >
           <span v-if="joining">抢奖中...</span>
           <span v-else-if="joinState === 'won'">已抢到，领奖码 {{ joinResult?.claimCode || '生成中' }}</span>
           <span v-else-if="joinState === 'lose'">未抢到</span>
+          <span v-else-if="lastJoinLost">新一轮来了，快抢！</span>
           <span v-else>立即抢奖</span>
         </button>
       </div>
@@ -73,7 +74,9 @@
 
       <!-- 未抢到提示，同样不随轮次消失而丢失 -->
       <div v-else-if="!activeRound && joinState === 'lose'" class="my-lose-card">
-        这一轮没抢到，下一轮手速再快一点 💪
+        <div style="font-size: 20px; margin-bottom: 4px;">🌟</div>
+        <div>这一轮没抢到，下一轮手速再快一点！</div>
+        <div style="margin-top: 4px; font-size: 11px; opacity: 0.6;">别灰心，还会有更多惊喜等着你</div>
       </div>
 
       <!-- 底部输入栏 -->
@@ -238,6 +241,7 @@ const activeRound = ref(null)
 const joining = ref(false)
 const joinState = ref('idle')   // idle | won | lose
 const joinResult = ref(null)
+const lastJoinLost = ref(false) // 上一轮是否未抢到（跨轮次保留，新一轮来了用来提醒）
 const countdown = ref(0)
 let countdownTimer = null
 
@@ -585,6 +589,7 @@ async function joinRound() {
     if (result.code === 1) {
       joinState.value = 'won'
       joinResult.value = result
+      lastJoinLost.value = false
       if (result.remaining !== undefined && result.remaining !== null) {
         activeRound.value.remaining = result.remaining
       }
@@ -595,6 +600,7 @@ async function joinRound() {
       alert(result.message)
     } else {
       joinState.value = 'lose'
+      lastJoinLost.value = true
       alert(result.message)
     }
   } catch (e) {
@@ -1585,9 +1591,20 @@ onUnmounted(() => {
   50% { transform: scale(1.02); box-shadow: var(--shadow-lg), var(--glow-gold-strong); }
 }
 
+/* 未抢到但新一轮来了 → 脉冲提醒用户快抢 */
+.seckill-btn.pulse {
+  animation: losePulse 1.2s ease-in-out infinite;
+}
+
+@keyframes losePulse {
+  0%, 100% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(1.03); opacity: 0.85; }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .seckill-btn { transition: none; animation: none; }
   .seckill-btn.won { animation: none; }
+  .seckill-btn.pulse { animation: none; }
 }
 
 .seckill-btn:active:not(:disabled) {

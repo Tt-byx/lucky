@@ -148,8 +148,15 @@ public class ScanLoginServiceImpl implements ScanLoginService {
      */
     private void checkStudentRate(ScanLoginDTO dto) {
         String key = "lucky:scan:student:" + dto.getActivityId() + ":" + dto.getStudentId();
-        Long count = stringRedisTemplate.execute(
-                rateCounterScript, Collections.singletonList(key), "60");
+        // 限流是防护措施不是业务逻辑，Redis 挂了 fail-open 放行
+        Long count;
+        try {
+            count = stringRedisTemplate.execute(
+                    rateCounterScript, Collections.singletonList(key), "60");
+        } catch (Exception e) {
+            log.warn("学号限流 Redis 不可用，fail-open: {}", e.getMessage());
+            return;
+        }
         if (count != null && count > 5L) {
             throw new BusinessException("该学号登录过于频繁，请稍后再试");
         }
@@ -159,7 +166,15 @@ public class ScanLoginServiceImpl implements ScanLoginService {
     public Long validateToken(String token) {
         if (token == null || token.isEmpty()) return null;
 
-        Object cached = redisUtil.get(TOKEN_KEY_PREFIX + token);
+        Object cached;
+        try {
+            cached = redisUtil.get(TOKEN_KEY_PREFIX + token);
+        } catch (Exception e) {
+            // Redis 不可用时令牌无法验证，返回 null = 未认证
+            // 比抛 500 好——前端能识别「未登录」并引导重新扫码
+            log.warn("令牌验证 Redis 不可用: {}", e.getMessage());
+            return null;
+        }
         if (cached == null) return null;
 
         try {

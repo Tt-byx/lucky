@@ -84,6 +84,11 @@ services:
     ports:
       # 只绑回环：本机调试/压测（bench 脚本打 localhost:8080）可用，公网不可达
       - "127.0.0.1:8080:8080"
+    volumes:
+      # OSS 不可用时背景图降级存本地，挂卷避免容器重建后丢失
+      - uploads-data:/app/uploads
+      # 日志文件持久化（logback 写 /app/logs），容器重建后日志不丢
+      - logs-data:/app/logs
     depends_on:
       mysql:
         condition: service_healthy
@@ -108,3 +113,5 @@ volumes:
   mysql-data:
   redis-data:
   rabbitmq-data:
+  uploads-data:
+  logs-data:

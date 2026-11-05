@@ -139,6 +139,38 @@
             <div v-for="record in winnerRecords" :key="record.id" class="winner-record">
               <span>{{ record.participantName }}</span>
               <span class="winner-student-id">{{ record.studentId }}</span>
+              <span v-if="record.claimed" class="tag tag-success" style="margin-left: 8px;">已领取</span>
+              <button
+                v-else
+                class="btn btn-sm"
+                style="margin-left: 8px; padding: 2px 10px; font-size: 12px;"
+                @click="verifyClaimCode(record.claimCode)"
+              >
+                核销
+              </button>
+            </div>
+          </div>
+
+          <!-- 领奖核销 -->
+          <div class="claim-panel" style="margin-top: 20px; padding: 16px; border: 1px solid var(--color-border); border-radius: var(--radius-md); background: var(--color-card);">
+            <h5 style="margin-bottom: 12px;">领奖核销</h5>
+            <div style="display: flex; gap: 10px; align-items: center;">
+              <input
+                v-model="claimCodeInput"
+                placeholder="输入领奖码（如 9A7E3082）"
+                style="flex: 1; padding: 8px 12px; border: 1px solid var(--color-border); border-radius: var(--radius-sm); background: var(--color-bg); color: var(--color-text); font-family: var(--font-mono); letter-spacing: 2px;"
+                @keyup.enter="verifyClaimCode(claimCodeInput)"
+              />
+              <button
+                class="btn"
+                :disabled="!claimCodeInput || claimLoading"
+                @click="verifyClaimCode(claimCodeInput)"
+              >
+                {{ claimLoading ? '核销中...' : '核销' }}
+              </button>
+            </div>
+            <div v-if="claimResult" :style="{ marginTop: '12px', padding: '10px', borderRadius: 'var(--radius-sm)', background: claimResult.ok ? 'rgba(139,168,106,0.12)' : 'rgba(201,120,79,0.12)', color: claimResult.ok ? 'var(--color-success)' : 'var(--color-danger)', fontSize: '14px' }">
+              {{ claimResult.message }}
             </div>
           </div>
         </div>
@@ -599,6 +631,11 @@ const prizes = ref([])
 const rounds = ref([])
 const winnerRecords = ref([])
 const remainingMap = ref({})
+
+// 领奖核销相关
+const claimCodeInput = ref('')
+const claimLoading = ref(false)
+const claimResult = ref(null)
 
 // 敏感词相关
 const newSensitiveWord = ref('')
@@ -1462,6 +1499,37 @@ watch(currentTab, (tab) => {
     fetchOnlineUsers()
   }
 })
+
+/** 领奖核销 */
+async function verifyClaimCode(code) {
+  if (!code || claimLoading.value) return
+  claimLoading.value = true
+  claimResult.value = null
+  try {
+    const res = await apiFetch(`${API_BASE}/api/lottery/claim?claimCode=${encodeURIComponent(code.trim())}`, {
+      method: 'POST'
+    })
+    const data = await res.json()
+    if (data.code === 200) {
+      const w = data.data
+      claimResult.value = {
+        ok: true,
+        message: `核销成功：${w.participantName || '未知'}（${w.studentId || ''}）已领取「${w.prizeName || '奖品'}」`
+      }
+      claimCodeInput.value = ''
+      // 刷新中奖记录
+      if (currentActivity.value?.id) {
+        fetchPrizes()
+      }
+    } else {
+      claimResult.value = { ok: false, message: data.message || '核销失败' }
+    }
+  } catch (e) {
+    claimResult.value = { ok: false, message: '网络异常，请重试' }
+  } finally {
+    claimLoading.value = false
+  }
+}
 
 /** 登录成功后加载首屏数据；刷新页面时若已有 token 也走这里 */
 async function loadInitialData() {

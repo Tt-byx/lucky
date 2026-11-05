@@ -1,15 +1,19 @@
 package com.lucky.scheduler;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.lucky.constant.RedisKeys;
 import com.lucky.entity.Activity;
 import com.lucky.service.ActivityService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.redisson.api.RLock;
+import org.redisson.api.RedissonClient;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.concurrent.TimeUnit;
 
 /**
  * 活动状态自动推进
@@ -19,6 +23,8 @@ import java.util.List;
  *
  * 这里每 30 秒按时间窗把状态推到位，管理员手动改的那条轨仍然保留，
  * 但不会再停留在错误状态上。
+ *
+ * 多实例部署时 @Scheduled 会在每个实例都跑，用 Redisson 分布式锁保证只跑一份。
  */
 @Slf4j
 @Component
@@ -29,10 +35,26 @@ public class ActivityStatusScheduler {
     private static final int IN_PROGRESS = 1;
     private static final int ENDED = 2;
 
+    private static final String LOCK_NAME = "activity-status-sync";
+
     private final ActivityService activityService;
+    private final RedissonClient redissonClient;
 
     @Scheduled(fixedDelay = 30000, initialDelay = 15000)
     public void syncActivityStatus() {
+        RLock lock = redissonClient.getLock(RedisKeys.schedulerLock(LOCK_NAME));
+        if (!lock.tryLock()) {
+            // 其他实例正在执行，本次跳过
+            return;
+        }
+        try {
+            doSync();
+        } finally {
+            lock.unlock();
+        }
+    }
+
+    private void doSync() {
         LocalDateTime now = LocalDateTime.now();
 
         List<Activity> candidates = activityService.list(new LambdaQueryWrapper<Activity>()

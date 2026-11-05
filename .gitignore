@@ -79,3 +79,7 @@ doc/
 # 测试产物（截图 / 事件日志 / 后端日志），只提交测试脚本本身
 bench/e2e/artifacts/
 bench/e2e/*.log
+
+# 数据库备份文件（由 docker/backup-db.sh 生成）
+backups/
+logs/

@@ -1,0 +1,41 @@
+# Alertmanager 配置
+# 告警路由：critical → 企微/钉钉机器人（可配），warning/info → 日志
+#
+# 当前默认只写日志文件（告警可见但不打扰）。
+# 要接通知渠道时，在 receivers 里加 webhook_configs 即可。
+
+global:
+  resolve_timeout: 5m
+
+route:
+  group_by: ['alertname', 'severity']
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 4h
+  receiver: 'default-log'
+
+  routes:
+    # critical 告警立即通知，重复间隔短
+    - match:
+        severity: critical
+      receiver: 'critical-log'
+      repeat_interval: 30m
+
+    # warning 告警适度通知
+    - match:
+        severity: warning
+      receiver: 'warning-log'
+      repeat_interval: 2h
+
+receivers:
+  # 默认：只记录到日志文件
+  - name: 'default-log'
+    webhook_configs: []
+
+  # critical：记录日志（接入企微/钉钉时在 webhook_configs 加 URL）
+  - name: 'critical-log'
+    webhook_configs: []
+
+  # warning：记录日志
+  - name: 'warning-log'
+    webhook_configs: []

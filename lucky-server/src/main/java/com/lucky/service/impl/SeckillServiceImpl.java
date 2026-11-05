@@ -131,7 +131,14 @@ public class SeckillServiceImpl implements SeckillService {
         }
 
         // 1. 轮次元信息走 Redis，避免每次抢奖都打 DB
-        Map<Object, Object> meta = stringRedisTemplate.opsForHash().entries(RedisKeys.roundMeta(roundId));
+        // Redis 不可用时友好拒绝（秒杀强依赖 Redis 的原子性，不能降级到 DB 做）
+        Map<Object, Object> meta;
+        try {
+            meta = stringRedisTemplate.opsForHash().entries(RedisKeys.roundMeta(roundId));
+        } catch (Exception e) {
+            log.error("读取轮次元信息失败（Redis 不可用）: roundId={}", roundId, e);
+            return fail(-5, "系统繁忙，请稍后重试");
+        }
         if (meta.isEmpty()) {
             return fail(-3, "本轮未开始");
         }

@@ -1,0 +1,103 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  日志体系配置
+
+  策略：
+  1. 控制台输出（Docker stdout，方便 docker logs 查看）
+  2. 文件输出：按天轮转 + 大小限制，ERROR 单独一个文件
+  3. 分环境级别：dev 全量 DEBUG、prod 只要 INFO 以上
+
+  文件位置：/app/logs/（docker-compose 挂载到宿主机 ./logs/backend）
+-->
+<configuration>
+
+    <!-- 引入 Spring Boot 默认的 conversionRule（颜色输出等） -->
+    <include resource="org/springframework/boot/logging/logback/defaults.xml"/>
+
+    <!-- ============ 属性 ============ -->
+    <property name="LOG_DIR" value="${LOG_DIR:-/app/logs}"/>
+    <property name="APP_NAME" value="lucky-server"/>
+    <property name="PATTERN" value="%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{40} - %msg%n"/>
+
+    <!-- ============ 控制台输出（Docker stdout） ============ -->
+    <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder>
+            <pattern>${PATTERN}</pattern>
+            <charset>UTF-8</charset>
+        </encoder>
+    </appender>
+
+    <!-- ============ 全量日志文件（按天轮转 + 大小限制） ============ -->
+    <appender name="FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
+        <file>${LOG_DIR}/${APP_NAME}.log</file>
+        <encoder>
+            <pattern>${PATTERN}</pattern>
+            <charset>UTF-8</charset>
+        </encoder>
+        <!-- 按天轮转 + 单文件最大 100MB -->
+        <rollingPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedRollingPolicy">
+            <fileNamePattern>${LOG_DIR}/${APP_NAME}.%d{yyyy-MM-dd}.%i.log.gz</fileNamePattern>
+            <maxFileSize>100MB</maxFileSize>
+            <maxHistory>30</maxHistory>
+            <totalSizeCap>2GB</totalSizeCap>
+        </rollingPolicy>
+    </appender>
+
+    <!-- ============ ERROR 级别单独文件（告警排查用） ============ -->
+    <appender name="ERROR_FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
+        <file>${LOG_DIR}/${APP_NAME}-error.log</file>
+        <encoder>
+            <pattern>${PATTERN}</pattern>
+            <charset>UTF-8</charset>
+        </encoder>
+        <filter class="ch.qos.logback.classic.filter.ThresholdFilter">
+            <level>ERROR</level>
+        </filter>
+        <rollingPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedRollingPolicy">
+            <fileNamePattern>${LOG_DIR}/${APP_NAME}-error.%d{yyyy-MM-dd}.%i.log.gz</fileNamePattern>
+            <maxFileSize>50MB</maxFileSize>
+            <maxHistory>60</maxHistory>
+            <totalSizeCap>1GB</totalSizeCap>
+        </rollingPolicy>
+    </appender>
+
+    <!-- ============ 分环境级别 ============ -->
+    <!-- dev / 默认：INFO（Spring/MyBatis 的 SQL 细节是 DEBUG） -->
+    <springProfile name="dev | default">
+        <root level="INFO">
+            <appender-ref ref="CONSOLE"/>
+            <appender-ref ref="FILE"/>
+            <appender-ref ref="ERROR_FILE"/>
+        </root>
+        <logger name="com.lucky" level="DEBUG"/>
+        <logger name="org.springframework.web" level="INFO"/>
+    </springProfile>
+
+    <!-- prod：INFO，只在核心业务打 DEBUG 会太多 -->
+    <springProfile name="prod">
+        <root level="INFO">
+            <appender-ref ref="CONSOLE"/>
+            <appender-ref ref="FILE"/>
+            <appender-ref ref="ERROR_FILE"/>
+        </root>
+        <!-- 业务包保持 INFO，ERROR 由 ERROR_FILE 单独收集 -->
+        <logger name="com.lucky" level="INFO"/>
+        <!-- 压缩 Spring 冗余日志 -->
+        <logger name="org.springframework" level="WARN"/>
+        <logger name="org.apache" level="WARN"/>
+        <!-- MyBatis SQL 日志只在需要时开（生产不开，IO 太大） -->
+        <logger name="com.lucky.mapper" level="INFO"/>
+    </springProfile>
+
+    <!-- multinode：多实例验证用，与 prod 同级 -->
+    <springProfile name="multinode">
+        <root level="INFO">
+            <appender-ref ref="CONSOLE"/>
+            <appender-ref ref="FILE"/>
+            <appender-ref ref="ERROR_FILE"/>
+        </root>
+        <logger name="com.lucky" level="INFO"/>
+        <logger name="org.springframework" level="WARN"/>
+    </springProfile>
+
+</configuration>

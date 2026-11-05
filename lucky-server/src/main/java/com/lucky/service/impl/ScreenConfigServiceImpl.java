@@ -68,7 +68,13 @@ public class ScreenConfigServiceImpl extends ServiceImpl<ScreenConfigMapper, Scr
 
         config.setBackgroundType(type);
         config.setBackgroundUrl(newUrl);
-        saveOrUpdate(config);
+        try {
+            saveOrUpdate(config);
+        } catch (Exception e) {
+            // DB 保存失败，删掉刚上传的文件，避免孤儿文件
+            deleteFile(newUrl);
+            throw e;
+        }
 
         redisUtil.delete(SCREEN_CONFIG_KEY);
         deleteFile(oldUrl);
@@ -98,7 +104,12 @@ public class ScreenConfigServiceImpl extends ServiceImpl<ScreenConfigMapper, Scr
 
         config.setMobileBackgroundType(type);
         config.setMobileBackgroundUrl(newUrl);
-        saveOrUpdate(config);
+        try {
+            saveOrUpdate(config);
+        } catch (Exception e) {
+            deleteFile(newUrl);
+            throw e;
+        }
 
         redisUtil.delete(SCREEN_CONFIG_KEY);
         deleteFile(oldUrl);

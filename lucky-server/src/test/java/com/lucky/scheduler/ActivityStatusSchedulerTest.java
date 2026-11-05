@@ -10,6 +10,8 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.redisson.api.RLock;
+import org.redisson.api.RedissonClient;
 
 import java.time.LocalDateTime;
 import java.util.List;
@@ -32,8 +34,20 @@ class ActivityStatusSchedulerTest {
     @Mock
     private ActivityService activityService;
 
+    @Mock
+    private RedissonClient redissonClient;
+
+    @Mock
+    private RLock rLock;
+
     @InjectMocks
     private ActivityStatusScheduler scheduler;
+
+    @org.junit.jupiter.api.BeforeEach
+    void setup() {
+        org.mockito.Mockito.lenient().when(redissonClient.getLock(org.mockito.ArgumentMatchers.anyString())).thenReturn(rLock);
+        org.mockito.Mockito.lenient().when(rLock.tryLock()).thenReturn(true);
+    }
 
     private Activity activity(int status, LocalDateTime start, LocalDateTime end) {
         Activity a = new Activity();

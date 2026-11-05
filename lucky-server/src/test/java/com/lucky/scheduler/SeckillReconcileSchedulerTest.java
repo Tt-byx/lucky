@@ -13,6 +13,8 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.redisson.api.RLock;
+import org.redisson.api.RedissonClient;
 
 import java.util.List;
 
@@ -40,10 +42,18 @@ class SeckillReconcileSchedulerTest {
     private SimpleMeterRegistry meterRegistry;
     private SeckillReconcileScheduler scheduler;
 
+    @org.mockito.Mock
+    private org.redisson.api.RedissonClient redissonClient;
+
+    @org.mockito.Mock
+    private org.redisson.api.RLock rLock;
+
     @BeforeEach
     void setUp() {
         meterRegistry = new SimpleMeterRegistry();
-        scheduler = new SeckillReconcileScheduler(prizeMapper, lotteryRoundMapper, winnerMapper, meterRegistry);
+        org.mockito.Mockito.lenient().when(redissonClient.getLock(org.mockito.ArgumentMatchers.anyString())).thenReturn(rLock);
+        org.mockito.Mockito.lenient().when(rLock.tryLock()).thenReturn(true);
+        scheduler = new SeckillReconcileScheduler(prizeMapper, lotteryRoundMapper, winnerMapper, meterRegistry, redissonClient);
     }
 
     private Prize prize(long id, int total, int stock) {

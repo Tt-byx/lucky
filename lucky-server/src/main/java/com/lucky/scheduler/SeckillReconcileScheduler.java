@@ -1,6 +1,7 @@
 package com.lucky.scheduler;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.lucky.constant.RedisKeys;
 import com.lucky.entity.LotteryRound;
 import com.lucky.entity.Prize;
 import com.lucky.entity.Winner;
@@ -10,6 +11,8 @@ import com.lucky.mapper.WinnerMapper;
 import io.micrometer.core.instrument.MeterRegistry;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.redisson.api.RLock;
+import org.redisson.api.RedissonClient;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
@@ -24,19 +27,38 @@ import java.util.List;
  *
  * 对账口径：某奖品「已中奖记录数」应当等于「total_stock - stock」。
  * 有进行中的轮次时跳过，因为此时 Redis 已预扣、MQ 可能还在排队，差值属于正常在途。
+ *
+ * 多实例部署时 @Scheduled 会在每个实例都跑，用 Redisson 分布式锁保证只跑一份
+ * （否则两个实例可能同时对同一条异常记录做修正，导致库存凭空多出来）。
  */
 @Slf4j
 @Component
 @RequiredArgsConstructor
 public class SeckillReconcileScheduler {
 
+    private static final String LOCK_NAME = "seckill-reconcile";
+
     private final PrizeMapper prizeMapper;
     private final LotteryRoundMapper lotteryRoundMapper;
     private final WinnerMapper winnerMapper;
     private final MeterRegistry meterRegistry;
+    private final RedissonClient redissonClient;
 
     @Scheduled(fixedDelay = 300000, initialDelay = 60000)
     public void reconcile() {
+        RLock lock = redissonClient.getLock(RedisKeys.schedulerLock(LOCK_NAME));
+        if (!lock.tryLock()) {
+            // 其他实例正在对账，本次跳过
+            return;
+        }
+        try {
+            doReconcile();
+        } finally {
+            lock.unlock();
+        }
+    }
+
+    private void doReconcile() {
         List<Prize> prizes;
         try {
             prizes = prizeMapper.selectList(new LambdaQueryWrapper<Prize>()
