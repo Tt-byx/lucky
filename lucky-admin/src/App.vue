@@ -1489,40 +1489,46 @@ onMounted(() => {
 /* 全局 CSS 变量（必须在非 scoped 样式中） */
 :root {
   /* ============================================================
-     管理后台设计令牌 —— 与大屏/手机端统一的「暗夜香槟金」
-     调性：工业实用（Industrial）—— 高密度信息、等宽数字、发丝边框
+     管理后台设计令牌 —— 浅色主题 + 香槟金强调
+
+     场景决策：后台是长时间办公场景，浅色比深色更易读、更专业。
+     大屏/手机端保持深色（现场氛围），后台保持浅色（工作效率），
+     通过「香槟金 + 衬线标题」维持品牌一致性。
+     侧边栏用深色做对比（经典专业后台设计），主内容区浅色。
      ============================================================ */
 
-  /* --- 暖调近黑 --- */
-  --color-bg: #0e0d0c;
-  --color-bg-light: #171614;
-  --color-bg-deep: #07070a;
+  /* --- 主内容区：暖调近白（不是纯白，减少刺眼） --- */
+  --color-bg: #faf8f5;
+  --color-bg-light: #f2efe9;
+  --color-bg-deep: #ebe6dd;
 
-  /* --- 卡片/侧边栏 --- */
-  --color-card: #171614;
-  --color-card-hover: #1e1c19;
-  --color-sidebar: #0a0a09;
-  --color-sidebar-active: rgba(212, 175, 55, 0.16);
+  /* --- 卡片：纯白 + 发丝边框 --- */
+  --color-card: #ffffff;
+  --color-card-hover: #fffdf8;
 
-  /* --- 香槟金：唯一强调色 --- */
-  --color-primary: #d4af37;
-  --color-primary-dark: #a8872a;
-  --color-primary-bright: #f0c75e;
-  --color-primary-dim: rgba(212, 175, 55, 0.14);
+  /* --- 侧边栏：深色对比（经典后台设计） --- */
+  --color-sidebar: #1a1614;
+  --color-sidebar-active: rgba(212, 175, 55, 0.18);
 
-  /* --- 语义色：与香槟金同族，不刺眼 --- */
-  --color-success: #8ba86a;
-  --color-warning: #d4af37;
-  --color-danger: #c9784f;
+  /* --- 香槟金：唯一强调色（浅色背景上用深一点的金保证对比度） --- */
+  --color-primary: #a8872a;
+  --color-primary-dark: #8a6d22;
+  --color-primary-bright: #d4af37;
+  --color-primary-dim: rgba(168, 135, 42, 0.10);
+
+  /* --- 语义色：暖调同族，不刺眼 --- */
+  --color-success: #5f8a4a;
+  --color-warning: #b8860b;
+  --color-danger: #b3543a;
 
   /* --- 发丝边框 --- */
-  --color-border: rgba(245, 241, 234, 0.10);
-  --color-border-strong: rgba(245, 241, 234, 0.18);
+  --color-border: rgba(42, 37, 32, 0.10);
+  --color-border-strong: rgba(42, 37, 32, 0.20);
 
-  /* --- 暖白文字 --- */
-  --color-text: #f5f1ea;
-  --color-text-secondary: rgba(245, 241, 234, 0.78);
-  --color-text-muted: rgba(245, 241, 234, 0.46);
+  /* --- 暖调近黑文字（不是纯黑） --- */
+  --color-text: #2a2520;
+  --color-text-secondary: rgba(42, 37, 32, 0.72);
+  --color-text-muted: rgba(42, 37, 32, 0.48);
 
   /* --- 字体栈：数据密集界面用等宽数字 --- */
   --font-display: Georgia, 'Times New Roman', 'Songti SC', 'STSong', 'SimSun', serif;
@@ -1534,14 +1540,14 @@ onMounted(() => {
   --radius-lg: 14px;
   --radius-xl: 20px;
 
-  /* --- 阴影三级（深色背景下带环境色） --- */
-  --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.28);
-  --shadow-md: 0 8px 28px rgba(0, 0, 0, 0.34);
-  --shadow-lg: 0 24px 64px rgba(0, 0, 0, 0.42);
+  /* --- 阴影三级（浅色背景用暖调灰阴影） --- */
+  --shadow-sm: 0 1px 3px rgba(42, 37, 32, 0.06);
+  --shadow-md: 0 4px 16px rgba(42, 37, 32, 0.08);
+  --shadow-lg: 0 12px 40px rgba(42, 37, 32, 0.12);
 
-  /* --- 金色光晕 --- */
-  --glow-gold: 0 0 24px rgba(212, 175, 55, 0.18);
-  --glow-gold-strong: 0 0 48px rgba(212, 175, 55, 0.32);
+  /* --- 金色光晕（浅色背景下更克制） --- */
+  --glow-gold: 0 2px 12px rgba(168, 135, 42, 0.16);
+  --glow-gold-strong: 0 4px 24px rgba(168, 135, 42, 0.28);
 
   /* --- 动效 --- */
   --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
@@ -1583,16 +1589,12 @@ onMounted(() => {
 .login-card {
   width: 100%;
   max-width: 420px;
-  /* 深色玻璃：与大屏/手机端统一的「暗夜香槟金」调性 */
-  background: linear-gradient(168deg,
-    rgba(245, 241, 234, 0.06) 0%,
-    rgba(245, 241, 234, 0.03) 100%);
-  border: 1px solid var(--color-border-strong);
+  /* 浅色主题：暖白卡片 + 发丝边框 + 金色光晕 */
+  background: var(--color-card);
+  border: 1px solid var(--color-border);
   border-radius: var(--radius-xl);
   padding: 40px 36px 36px;
   box-shadow: var(--shadow-lg), var(--glow-gold);
-  backdrop-filter: blur(24px) saturate(140%);
-  -webkit-backdrop-filter: blur(24px) saturate(140%);
 }
 
 /* 顶部金色高光线 */
@@ -1605,7 +1607,7 @@ onMounted(() => {
   height: 1px;
   background: linear-gradient(90deg,
     transparent,
-    rgba(240, 199, 94, 0.7) 50%,
+    rgba(168, 135, 42, 0.6) 50%,
     transparent);
 }
 
@@ -1679,12 +1681,11 @@ onMounted(() => {
   padding: 13px;
   border: none;
   border-radius: var(--radius-md);
-  /* 香槟金主按钮：深色文字保证对比度 */
+  /* 香槟金主按钮：亮金渐变 + 深色文字，保证对比度 ≥ 4.5:1 */
   background: linear-gradient(148deg,
     var(--color-primary-bright) 0%,
-    var(--color-primary) 52%,
-    var(--color-primary-dark) 100%);
-  color: #1f1400;
+    var(--color-primary) 100%);
+  color: #2a2000;
   font-family: var(--font-display);
   font-size: 15px;
   font-weight: 700;
@@ -1732,13 +1733,14 @@ onMounted(() => {
 .sidebar {
   width: 240px;
   background: var(--color-sidebar);
-  color: var(--color-text);
+  /* 侧边栏是深色背景，文字必须用浅色（不能用 --color-text，那是主内容区的深色） */
+  color: #f5f1ea;
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
   position: relative;
-  /* 顶部一条金色细线，与大屏/手机端的视觉语言统一 */
-  border-right: 1px solid var(--color-border);
+  /* 顶部一条金色细线 */
+  border-right: 1px solid rgba(245, 241, 234, 0.10);
 }
 
 .sidebar::before {
@@ -1778,7 +1780,8 @@ onMounted(() => {
   display: flex;
   align-items: center;
   padding: 12px 16px;
-  color: var(--color-text-muted);
+  /* 深色侧边栏上的浅色文字 */
+  color: rgba(245, 241, 234, 0.62);
   text-decoration: none;
   cursor: pointer;
   transition: color var(--dur-fast) ease-out,
@@ -1793,7 +1796,7 @@ onMounted(() => {
 
 .sidebar-nav a:hover {
   color: var(--color-primary-bright);
-  background: var(--color-primary-dim);
+  background: rgba(212, 175, 55, 0.14);
   padding-left: 20px;
 }
 
@@ -1803,10 +1806,10 @@ onMounted(() => {
 }
 
 .sidebar-nav a.active {
-  background: var(--color-sidebar-active);
+  background: rgba(212, 175, 55, 0.18);
   color: var(--color-primary-bright);
-  /* 左侧一条金色竖线，标记当前项 */
-  box-shadow: inset 3px 0 0 var(--color-primary);
+  /* 左侧一条亮金色竖线，标记当前项 */
+  box-shadow: inset 3px 0 0 var(--color-primary-bright);
   font-weight: 600;
 }
 
